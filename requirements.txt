@@ -1,0 +1,17 @@
+# The pipeline uses only the Python standard library -- no pip dependencies.
+# (The Anthropic LLM optimizer is called over HTTPS via urllib; no SDK needed.)
+#
+# LLM optimization (default mode) requires an Anthropic API key:
+#   export ANTHROPIC_API_KEY=sk-ant-...
+# Use --deterministic to run without the LLM / without a key.
+#
+# System requirements (install once in WSL):
+#   sudo apt-get update
+#   sudo apt-get install -y \
+#     texlive-latex-base texlive-latex-recommended texlive-latex-extra \
+#     texlive-fonts-recommended texlive-fonts-extra poppler-utils
+#
+# texlive-* provides pdflatex and every package the template uses
+# (latexsym, fullpage, titlesec, marvosym, enumitem, hyperref, fancyhdr,
+#  babel, tabularx, glyphtounicode). poppler-utils provides pdfinfo for
+# reliable page counting.

@@ -1,0 +1,153 @@
+%-------------------------
+% Resume in Latex
+% Author : Jake Gutierrez
+% Based off of: https://github.com/sb2nov/resume
+% License : MIT
+%------------------------
+
+\documentclass[letterpaper,11pt]{article}
+
+\usepackage{latexsym}
+\usepackage[empty]{fullpage}
+\usepackage{titlesec}
+\usepackage{marvosym}
+\usepackage[usenames,dvipsnames]{color}
+\usepackage{verbatim}
+\usepackage{enumitem}
+\usepackage[hidelinks]{hyperref}
+\usepackage{fancyhdr}
+\usepackage[english]{babel}
+\usepackage{tabularx}
+\input{glyphtounicode}
+
+\pagestyle{fancy}
+\fancyhf{} 
+\fancyfoot{}
+\renewcommand{\headrulewidth}{0pt}
+\renewcommand{\footrulewidth}{0pt}
+
+\addtolength{\oddsidemargin}{-0.5in}
+\addtolength{\evensidemargin}{-0.5in}
+\addtolength{\textwidth}{1in}
+\addtolength{\topmargin}{-.5in}
+\addtolength{\textheight}{1in}
+
+\urlstyle{same}
+
+\raggedbottom
+\raggedright
+\setlength{\tabcolsep}{0in}
+
+\titleformat{\section}{
+  \vspace{-4pt}\scshape\raggedright\large
+}{}{0em}{}[\color{black}\titlerule \vspace{-5pt}]
+
+\pdfgentounicode=1
+
+\newcommand{\resumeItem}[1]{
+  \item\small{{#1 \vspace{-2pt}}}
+}
+
+\newcommand{\resumeSubheading}[4]{
+  \vspace{-2pt}\item
+    \begin{tabular*}{0.97\textwidth}[t]{l@{\extracolsep{\fill}}r}
+      \textbf{#1} & #2 \\
+      \textit{\small#3} & \textit{\small #4} \\
+    \end{tabular*}\vspace{-7pt}
+}
+
+\newcommand{\resumeSubSubheading}[2]{
+    \item
+    \begin{tabular*}{0.97\textwidth}{l@{\extracolsep{\fill}}r}
+      \textit{\small#1} & \textit{\small #2} \\
+    \end{tabular*}\vspace{-7pt}
+}
+
+\newcommand{\resumeProjectHeading}[2]{
+    \item
+    \begin{tabular*}{0.97\textwidth}{l@{\extracolsep{\fill}}r}
+      \small#1 & #2 \\
+    \end{tabular*}\vspace{-7pt}
+}
+
+\newcommand{\resumeSubItem}[1]{\resumeItem{#1}\vspace{-4pt}}
+
+\renewcommand\labelitemii{$\vcenter{\hbox{\tiny$\bullet$}}$}
+
+\newcommand{\resumeSubHeadingListStart}{\begin{itemize}[leftmargin=0.15in, label={}]}
+\newcommand{\resumeSubHeadingListEnd}{\end{itemize}}
+\newcommand{\resumeItemListStart}{\begin{itemize}}
+\newcommand{\resumeItemListEnd}{\end{itemize}\vspace{-5pt}}
+
+\begin{document}
+
+%--- HEADING ---
+\begin{center}
+    \textbf{\Huge \scshape Jordan A. Rivera} \\ \vspace{1pt}
+    \small +1 555-0142 $|$
+    \href{mailto:jordan.rivera@example.com}{\underline{jordan.rivera@example.com}} $|$
+    \href{https://linkedin.com/in/jordan-rivera}{\underline{linkedin.com/in/jordan-rivera}} $|$
+    \href{https://github.com/jordanrivera}{\underline{github.com/jordanrivera}}
+\end{center}
+
+%--- EDUCATION ---
+\section{Education}
+  \resumeSubHeadingListStart
+    \resumeSubheading
+      {State University}{Austin, TX}
+      {B.S. in Computer Science, GPA: 3.8/4.0}{Aug 2018 -- May 2022}
+  \resumeSubHeadingListEnd
+
+%--- EXPERIENCE ---
+\section{Experience}
+  \resumeSubHeadingListStart
+    \resumeSubheading
+      {Cloudwave Systems}{Remote}
+      {Senior Software Engineer}{Jun 2022 -- Present}
+      \resumeItemListStart
+        \resumeItem{Architected a Python \& FastAPI microservice on AWS handling 12M requests/day, cutting p95 latency by 38\%.}
+        \resumeItem{Optimized PostgreSQL queries and Redis caching, saving an estimated \$90k/year in compute costs.}
+        \resumeItem{Led migration of a monolith to Kubernetes with Terraform-managed infrastructure, reducing deploy time from 45 min to 6 min.}
+        \resumeItem{Built a Kafka-based event pipeline feeding Snowflake, enabling real-time analytics for 200+ internal users.}
+        \resumeItem{Mentored 4 engineers and introduced CI/CD quality gates that dropped production incidents by 25\%.}
+      \resumeItemListEnd
+    \resumeSubheading
+      {Brightline Apps}{Austin, TX}
+      {Software Engineer}{Jul 2020 -- May 2022}
+      \resumeItemListStart
+        \resumeItem{Implemented a Django REST API and integrated Stripe billing with 99.9\% uptime.}
+        \resumeItem{Developed React \& TypeScript front-end features used by 50k+ monthly active users.}
+        \resumeItem{Wrote automated tests raising coverage from 40\% to 85\% across the core service.}
+        \resumeItem{Collaborated with design to ship an accessibility overhaul meeting WCAG 2.1 AA.}
+      \resumeItemListEnd
+  \resumeSubHeadingListEnd
+
+%--- PROJECTS ---
+\section{Projects}
+    \resumeSubHeadingListStart
+    \resumeProjectHeading
+        {\textbf{OpenMetrics Dashboard} $|$ \emph{Go, React, Prometheus, Docker}}{2023}
+      \resumeItemListStart
+        \resumeItem{Implemented a Go collector exporting 60+ Prometheus metrics with \textless{}2\% overhead.}
+        \resumeItem{Built an open-source observability dashboard with 1.2k GitHub stars.}
+      \resumeItemListEnd
+    \resumeProjectHeading
+        {\textbf{ResumeForge} $|$ \emph{Python, LaTeX, FastAPI}}{2022}
+      \resumeItemListStart
+        \resumeItem{Created a deterministic JSON-to-LaTeX resume generator with ATS-aware formatting.}
+        \resumeItem{Added a one-page auto-fit compiler loop using pdflatex.}
+      \resumeItemListEnd
+    \resumeSubHeadingListEnd
+
+%--- TECHNICAL SKILLS ---
+\section{Technical Skills}
+ \begin{itemize}[leftmargin=0.15in, label={}]
+    \small{\item{
+     \textbf{Data}{: PostgreSQL, Redis, Kafka, Snowflake, Spark} \\
+     \textbf{Languages}{: Python, Go, SQL, TypeScript, Java, C++} \\
+     \textbf{Frameworks}{: FastAPI, Django, React, Node.js, Spring Boot} \\
+     \textbf{Cloud \& DevOps}{: AWS, Docker, Kubernetes, Terraform, CI/CD}
+    }}
+ \end{itemize}
+
+\end{document}

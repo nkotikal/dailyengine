@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ResumeForge - tailored, one-page, ATS-ready</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <!-- animated liquid-glass backdrop -->
+  <div class="backdrop" aria-hidden="true">
+    <span class="blob blob-1"></span>
+    <span class="blob blob-2"></span>
+    <span class="blob blob-3"></span>
+    <span class="blob blob-4"></span>
+  </div>
+
+  <main class="shell">
+    <header class="hero">
+      <div class="hero-mark">RF</div>
+      <div>
+        <h1>ResumeForge</h1>
+        <p class="tagline">Paste a job description. Get a tailored, one-page, ATS-ready resume.</p>
+      </div>
+    </header>
+
+    <section class="chips" id="status-chips" aria-live="polite"></section>
+
+    <div class="grid">
+      <!-- INPUT PANEL -->
+      <section class="glass panel input-panel">
+        <div class="section-head">
+          <h2>Context</h2>
+          <div class="head-actions">
+            <span class="pill" id="profile-pill">checking...</span>
+            <button class="link-btn danger" id="clear-profile" type="button" hidden>Clear saved profile</button>
+          </div>
+        </div>
+        <p class="hint" id="profile-hint">Your saved profile is used automatically.</p>
+
+        <button class="disclosure" id="profile-toggle" type="button" aria-expanded="false">
+          <span class="chev">›</span><span id="profile-toggle-label">Add or update your resume / profile</span>
+        </button>
+
+        <div class="collapsible" id="profile-wrap" hidden>
+          <div class="upload-row">
+            <label class="btn-glass subtle upload-btn">
+              <span>Upload resume</span>
+              <input type="file" id="resume-file" accept=".pdf,.txt,.json,.md" hidden />
+            </label>
+            <span class="file-chip" id="file-chip" hidden></span>
+            <span class="micro">PDF, TXT, or JSON</span>
+          </div>
+          <textarea id="profile" class="field" spellcheck="false"
+            placeholder="Paste your FULL resume (or a profile JSON) here. This becomes your profile and replaces any saved one. To only add small details (location, extra skills), generate first and use the Coverage gaps panel."></textarea>
+          <div class="row-actions">
+            <button class="link-btn" id="load-sample-profile" type="button">Load sample profile JSON</button>
+            <button class="link-btn" id="paste-profile" type="button" data-target="profile">Paste from clipboard</button>
+          </div>
+        </div>
+
+        <div class="section-head spaced">
+          <h2>Job description</h2>
+          <span class="req">required</span>
+        </div>
+        <textarea id="jd" class="field" placeholder="Paste the full job description here..."></textarea>
+        <div class="row-actions">
+          <button class="link-btn" id="load-sample-jd" type="button">Load sample JD</button>
+          <button class="link-btn" id="paste-jd" type="button" data-target="jd">Paste from clipboard</button>
+        </div>
+
+        <div class="options">
+          <label class="select-wrap">
+            <span>Model</span>
+            <select id="model" class="field select">
+              <option value="">Default</option>
+              <option value="claude-opus-4-8">Claude Opus 4.8 (best)</option>
+              <option value="claude-sonnet-4-6">Claude Sonnet 4.6 (fast)</option>
+              <option value="claude-haiku-4-5">Claude Haiku 4.5 (fastest)</option>
+            </select>
+          </label>
+
+          <label class="switch-wrap" title="Skip the AI; deterministic keyword tailoring only.">
+            <span>Offline mode</span>
+            <span class="switch">
+              <input type="checkbox" id="deterministic" />
+              <span class="track"><span class="thumb"></span></span>
+            </span>
+          </label>
+        </div>
+
+        <button class="generate" id="generate" type="button">
+          <span class="btn-label">Generate resume</span>
+          <span class="spinner" hidden></span>
+        </button>
+
+        <div class="error" id="error" hidden></div>
+      </section>
+
+      <!-- RESULT PANEL -->
+      <section class="glass panel result-panel">
+        <div class="section-head">
+          <h2>Preview</h2>
+          <span class="pill ghost" id="result-meta" hidden></span>
+        </div>
+
+        <div class="result-empty" id="result-empty">
+          <div class="empty-art" aria-hidden="true"></div>
+          <p>Your tailored resume will appear here.</p>
+        </div>
+
+        <div class="result-live" id="result-live" hidden>
+          <div class="summary-box" id="summary-box" hidden>
+            <div class="summary-label">AI notes</div>
+            <p class="summary-text" id="summary-text"></p>
+          </div>
+          <iframe id="pdf-frame" title="Resume PDF preview"></iframe>
+          <div class="result-actions">
+            <a class="btn-glass" id="download-pdf" download="resume.pdf">Download PDF</a>
+            <a class="btn-glass subtle" id="download-tex" download="resume.tex">Download .tex</a>
+            <button class="btn-glass subtle" id="toggle-tex" type="button">Edit LaTeX</button>
+          </div>
+          <div class="tex-editor-wrap" id="tex-editor-wrap" hidden>
+            <p class="hint tex-hint">Edit the LaTeX below, then recompile. Changes apply to the PDF only — use Generate again to re-run the AI.</p>
+            <textarea id="tex-editor" class="field tex-view mono" spellcheck="false"></textarea>
+            <button class="btn-glass" id="recompile-tex" type="button">
+              <span class="btn-label">Recompile PDF</span>
+              <span class="spinner" hidden></span>
+            </button>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- COVERAGE GAPS PANEL -->
+    <section class="glass panel gaps-panel" id="gaps-panel" hidden>
+      <div class="section-head">
+        <h2>Coverage gaps</h2>
+        <span class="pill ghost" id="gaps-count" hidden></span>
+      </div>
+      <p class="hint" id="gaps-hint">
+        Job-description requirements the AI could not truthfully fit into your resume,
+        ranked by importance. If any actually apply to you, add the real details below
+        and regenerate - it's saved so each pass closes more gaps.
+      </p>
+
+      <div class="gaps-list" id="gaps-list"></div>
+
+      <div class="gaps-extra">
+        <label class="micro" for="gaps-notes">Anything else to add (optional)</label>
+        <textarea id="gaps-notes" class="field" spellcheck="false"
+          placeholder="Add any other truthful experience, skills, or metrics you want considered next time."></textarea>
+      </div>
+
+      <button class="generate" id="regenerate" type="button">
+        <span class="btn-label">Add details &amp; regenerate</span>
+        <span class="spinner" hidden></span>
+      </button>
+    </section>
+
+    <footer class="foot">Single column - standard headings - selectable text - auto-fit to one page.</footer>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>

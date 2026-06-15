@@ -1,0 +1,4 @@
+{
+  "required": ["Python", "AWS", "Kubernetes", "FastAPI", "microservices", "PostgreSQL"],
+  "preferred": ["Terraform", "Kafka", "CI/CD", "Docker", "Snowflake", "Go", "React"]
+}

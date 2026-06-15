@@ -1,0 +1,71 @@
+{
+  "contact": {
+    "name": "Jordan A. Rivera",
+    "email": "jordan.rivera@example.com",
+    "phone": "+1 555-0142",
+    "linkedin": "linkedin.com/in/jordan-rivera",
+    "github": "github.com/jordanrivera"
+  },
+  "education": [
+    {
+      "institution": "State University",
+      "location": "Austin, TX",
+      "degree": "B.S. in Computer Science",
+      "gpa": "3.8/4.0",
+      "dates": "Aug 2018 -- May 2022"
+    }
+  ],
+  "skills": {
+    "Languages": ["Python", "TypeScript", "Go", "SQL", "Java", "C++"],
+    "Frameworks": ["React", "Node.js", "Django", "FastAPI", "Spring Boot"],
+    "Cloud & DevOps": ["AWS", "Docker", "Kubernetes", "Terraform", "CI/CD"],
+    "Data": ["PostgreSQL", "Redis", "Kafka", "Spark", "Snowflake"]
+  },
+  "experience": [
+    {
+      "company": "Cloudwave Systems",
+      "location": "Remote",
+      "role": "Senior Software Engineer",
+      "dates": "Jun 2022 -- Present",
+      "bullets": [
+        "Architected a Python & FastAPI microservice on AWS handling 12M requests/day, cutting p95 latency by 38%.",
+        "Led migration of a monolith to Kubernetes with Terraform-managed infrastructure, reducing deploy time from 45 min to 6 min.",
+        "Built a Kafka-based event pipeline feeding Snowflake, enabling real-time analytics for 200+ internal users.",
+        "Mentored 4 engineers and introduced CI/CD quality gates that dropped production incidents by 25%.",
+        "Optimized PostgreSQL queries and Redis caching, saving an estimated $90k/year in compute costs."
+      ]
+    },
+    {
+      "company": "Brightline Apps",
+      "location": "Austin, TX",
+      "role": "Software Engineer",
+      "dates": "Jul 2020 -- May 2022",
+      "bullets": [
+        "Developed React & TypeScript front-end features used by 50k+ monthly active users.",
+        "Implemented a Django REST API and integrated Stripe billing with 99.9% uptime.",
+        "Wrote automated tests raising coverage from 40% to 85% across the core service.",
+        "Collaborated with design to ship an accessibility overhaul meeting WCAG 2.1 AA."
+      ]
+    }
+  ],
+  "projects": [
+    {
+      "title": "OpenMetrics Dashboard",
+      "tech": ["Go", "React", "Prometheus", "Docker"],
+      "dates": "2023",
+      "bullets": [
+        "Built an open-source observability dashboard with 1.2k GitHub stars.",
+        "Implemented a Go collector exporting 60+ Prometheus metrics with <2% overhead."
+      ]
+    },
+    {
+      "title": "ResumeForge",
+      "tech": ["Python", "LaTeX", "FastAPI"],
+      "dates": "2022",
+      "bullets": [
+        "Created a deterministic JSON-to-LaTeX resume generator with ATS-aware formatting.",
+        "Added a one-page auto-fit compiler loop using pdflatex."
+      ]
+    }
+  ]
+}

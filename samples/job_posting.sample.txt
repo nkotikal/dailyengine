@@ -1,0 +1,7 @@
+Senior Backend Engineer
+
+We are looking for a backend engineer experienced with Python and FastAPI to
+build and operate microservices on AWS. You will work with Kubernetes, Docker,
+and Terraform to manage infrastructure as code, and design event pipelines with
+Kafka feeding our Snowflake warehouse. Strong PostgreSQL and Redis skills are
+required. Experience with CI/CD and Go is a plus.

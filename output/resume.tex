@@ -1,0 +1,175 @@
+%-------------------------
+% Resume in Latex
+% Author : Jake Gutierrez
+% Based off of: https://github.com/sb2nov/resume
+% License : MIT
+%------------------------
+
+\documentclass[letterpaper,10pt]{article}
+
+\usepackage{latexsym}
+\usepackage[empty]{fullpage}
+\usepackage{titlesec}
+\usepackage{marvosym}
+\usepackage[usenames,dvipsnames]{color}
+\usepackage{verbatim}
+\usepackage{enumitem}
+\usepackage[hidelinks]{hyperref}
+\usepackage{fancyhdr}
+\usepackage[english]{babel}
+\usepackage{tabularx}
+\input{glyphtounicode}
+
+\pagestyle{fancy}
+\fancyhf{} 
+\fancyfoot{}
+\renewcommand{\headrulewidth}{0pt}
+\renewcommand{\footrulewidth}{0pt}
+
+\addtolength{\oddsidemargin}{-0.6in}
+\addtolength{\evensidemargin}{-0.6in}
+\addtolength{\textwidth}{1.2in}
+\addtolength{\topmargin}{-.5in}
+\addtolength{\textheight}{1.5in}
+
+\urlstyle{same}
+
+\raggedbottom
+\raggedright
+\setlength{\tabcolsep}{0in}
+
+\titleformat{\section}{
+  \vspace{-4pt}\scshape\raggedright\large
+}{}{0em}{}[\color{black}\titlerule \vspace{-5pt}]
+
+\pdfgentounicode=1
+
+\newcommand{\resumeItem}[1]{
+  \item\small{{#1 \vspace{-3pt}}}
+}
+
+\newcommand{\resumeSubheading}[4]{
+  \vspace{-2pt}\item
+    \begin{tabular*}{0.97\textwidth}[t]{l@{\extracolsep{\fill}}r}
+      \textbf{#1} & #2 \\
+      \textit{\small#3} & \textit{\small #4} \\
+    \end{tabular*}\vspace{-8pt}
+}
+
+\newcommand{\resumeSubSubheading}[2]{
+    \item
+    \begin{tabular*}{0.97\textwidth}{l@{\extracolsep{\fill}}r}
+      \textit{\small#1} & \textit{\small #2} \\
+    \end{tabular*}\vspace{-7pt}
+}
+
+\newcommand{\resumeProjectHeading}[2]{
+    \item
+    \begin{tabular*}{0.97\textwidth}{l@{\extracolsep{\fill}}r}
+      \small#1 & #2 \\
+    \end{tabular*}\vspace{-7pt}
+}
+
+\newcommand{\resumeSubItem}[1]{\resumeItem{#1}\vspace{-4pt}}
+
+\renewcommand\labelitemii{$\vcenter{\hbox{\tiny$\bullet$}}$}
+
+\newcommand{\resumeSubHeadingListStart}{\begin{itemize}[leftmargin=0.15in, label={}]}
+\newcommand{\resumeSubHeadingListEnd}{\end{itemize}}
+\newcommand{\resumeItemListStart}{\begin{itemize}}
+\newcommand{\resumeItemListEnd}{\end{itemize}\vspace{-6pt}}
+
+\begin{document}
+
+%--- HEADING ---
+\begin{center}
+    \textbf{\Huge \scshape Nikhil Kotikalapudi} \\ \vspace{1pt}
+    \small 610-202-0722 $|$
+    \href{mailto:nkotikalapudi@outlook.com}{\underline{nkotikalapudi@outlook.com}} $|$
+    \href{https://www.linkedin.com/in/nikhil-kotikalapudi}{\underline{www.linkedin.com/in/nikhil-kotikalapudi}} $|$
+    \href{https://github.com/23silicon}{\underline{github.com/23silicon}}
+\end{center}
+
+%--- EDUCATION ---
+\section{Education}
+  \resumeSubHeadingListStart
+    \resumeSubheading
+      {The Pennsylvania State University – Schreyer Honors College | School of EECS}{State College, PA}
+      {Bachelor of Science in Computer Engineering, GPA: 3.94/4.0}{Expected Graduation: May 2027}
+  \resumeSubHeadingListEnd
+
+%--- EXPERIENCE ---
+\section{Experience}
+  \resumeSubHeadingListStart
+    \resumeSubheading
+      {AMD}{Austin, TX}
+      {Incoming GPU Performance Intern (AI Models)}{May 2026}
+      \resumeItemListStart
+        \resumeItem{Designing an automated GPU profiling pipeline for the machine learning frameworks team to identify inference bottlenecks and overcome current profiling-level limitations, using vLLM and kineto traces.}
+        \resumeItem{Optimizing ROCm kernels for AI model performance across GPU architectures.}
+      \resumeItemListEnd
+    \resumeSubheading
+      {AlphaGPU}{Palo Alto, CA}
+      {Software Engineer Intern (Infrastructure)}{Aug 2025 – Jan 2026}
+      \resumeItemListStart
+        \resumeItem{Deployed robust GPU profiling for 1000+ users with NVML and torch profiler under Linux, overcoming cloud-hosted GPU limitations with NSYS/NCU.}
+        \resumeItem{Scaled LeetGPU, a platform democratizing hardware-accelerated programming via GPU challenges and online test environments supporting CUDA, Triton, PyTorch, Mojo, and CuTe DSL.}
+      \resumeItemListEnd
+    \resumeSubheading
+      {NeuroAI Lab}{State College, PA}
+      {AI Acceleration Research Assistant}{Feb 2025 – Present}
+      \resumeItemListStart
+        \resumeItem{Designed a novel, scalable high-dimensional Bayesian optimization algorithm with dynamic sampling for hyperparameter tuning of neural networks.}
+        \resumeItem{Researching hardware-software co-design of neural networks on neuromorphic and novel architectures, consolidating findings against relevant papers.}
+      \resumeItemListEnd
+    \resumeSubheading
+      {IEEE Electronics Packaging Society}{Piscataway, NJ}
+      {Electronics Research Intern}{Feb 2025 – May 2025}
+      \resumeItemListStart
+        \resumeItem{Sustained 96.9\% model accuracy under constrained neuromorphic hardware limits (R\_ON/R\_OFF, bit discretization) via system-level simulation.}
+        \resumeItem{Implemented hardware-in-the-loop training with varying weight quantization, characterizing an 8\% accuracy drop on image data.}
+      \resumeItemListEnd
+    \resumeSubheading
+      {nth Solutions}{Coatesville, PA}
+      {Electrical Engineering \& Data Analyst Intern}{June 2023 – July 2024}
+      \resumeItemListStart
+        \resumeItem{Developed 3 ML-driven signal processing algorithms and benchmarked 100+ nonstationary time-series in Python and MATLAB to reduce vibrations.}
+        \resumeItem{Co-inventor on 2 sensor-based safety products under patent preparation; prototyped a LiDAR ToF device reaching \textasciitilde{}90\% danger-detection accuracy.}
+      \resumeItemListEnd
+  \resumeSubHeadingListEnd
+
+%--- PROJECTS ---
+\section{Projects}
+    \resumeSubHeadingListStart
+    \resumeProjectHeading
+        {\textbf{FlashAttention} $|$ \emph{CUDA, C++, PyTorch}}{}
+      \resumeItemListStart
+        \resumeItem{Developed a FlashAttention-inspired attention kernel in CUDA achieving 1.54x speedup and 8x more tokens than naïve self-attention, benchmarked against PyTorch SDPA.}
+        \resumeItem{Scaled to 200k+ context on a Tesla T4 with O(N) memory via tiling and online softmax; tuned FP16 tiling and resolved shared-memory bank conflicts to maximize occupancy and HBM throughput.}
+      \resumeItemListEnd
+    \resumeProjectHeading
+        {\textbf{Neural Network from Scratch, CUDA Accelerated} $|$ \emph{CUDA, C++, Python, NumPy}}{}
+      \resumeItemListStart
+        \resumeItem{Achieved 10.57x training speedup (40 to 3.8 min) by accelerating a from-scratch deep neural network with a custom CUDA matmul (GEMM) kernel.}
+        \resumeItem{Reached 97.83\% on MNIST and 88.02\% on Fashion-MNIST with a custom optimizer for dynamic learning-rate scheduling.}
+      \resumeItemListEnd
+    \resumeProjectHeading
+        {\textbf{4 Essential Machine Learning Projects} $|$ \emph{Python, PyTorch, Transformers, Scikit-Learn}}{}
+      \resumeItemListStart
+        \resumeItem{Built a RAG bot with the TinyLlama LLM, a pneumonia-detection CNN reaching 90+\% accuracy, and a reinforcement learning agent.}
+      \resumeItemListEnd
+    \resumeSubHeadingListEnd
+
+%--- TECHNICAL SKILLS ---
+\section{Technical Skills}
+ \begin{itemize}[leftmargin=0.15in, label={}]
+    \small{\item{
+     \textbf{AI/ML \& Inference}{: PyTorch, TensorRT-inspired kernels, vLLM, Transformers, FlashAttention, attention mechanisms, GEMM / matmul kernels, KV-cache, language models (LLMs), multi-modality models, RAG, reinforcement learning, model inference optimization, deep learning} \\
+     \textbf{Accelerated Computing \& HPC}{: CUDA, GPU profiling (NSYS/NCU, NVML, torch profiler), Triton, GPU parallelization, FP16 half-precision, memory hierarchy / HBM optimization, occupancy \& throughput tuning, ROCm kernels} \\
+     \textbf{Languages}{: Python, C/C++, CUDA, Go, Java, Verilog/SystemVerilog, MIPS Assembly} \\
+     \textbf{Tools \& Platforms}{: Linux, Docker, LLVM, NumPy, Scikit-Learn} \\
+     \textbf{Core Competency Areas}{: accelerated computing, AI/ML optimization, HPC, computer architecture, compilers, in-memory computing, signal processing, linear algebra, data analysis}
+    }}
+ \end{itemize}
+
+\end{document}
