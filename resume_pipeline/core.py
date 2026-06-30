@@ -29,19 +29,59 @@ DEFAULT_ENV = ROOT / ".env"
 def load_dotenv(path: Path = DEFAULT_ENV) -> None:
     """Minimal .env loader (stdlib only); does not override the real environment."""
     path = Path(path)
-    if not path.exists():
+    if path.exists():
+        for raw in path.read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            if line.lower().startswith("export "):
+                line = line[len("export "):]
+            key, _, value = line.partition("=")
+            key = key.strip()
+            value = value.strip().strip('"').strip("'")
+            if key and key not in os.environ:
+                os.environ[key] = value
+    _configure_ca_bundle()
+
+
+def _configure_ca_bundle() -> None:
+    """Trust extra corporate CAs (e.g. AMD Zscaler) for all outbound HTTPS.
+
+    On networks that intercept TLS (Zscaler/Netskope), Python's CA store won't
+    trust the proxy's certificates and every HTTPS call fails. If a corporate CA
+    bundle is available, we merge it with the system CAs and point SSL_CERT_FILE at
+    the result, fixing the LLM gateway, GitHub, NVIDIA careers, etc. Harmless off
+    the corporate network (the extra CAs simply go unused).
+    """
+    import ssl
+
+    # An explicit SSL_CERT_FILE always wins.
+    if os.environ.get("SSL_CERT_FILE"):
         return
-    for raw in path.read_text(encoding="utf-8").splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        if line.lower().startswith("export "):
-            line = line[len("export "):]
-        key, _, value = line.partition("=")
-        key = key.strip()
-        value = value.strip().strip('"').strip("'")
-        if key and key not in os.environ:
-            os.environ[key] = value
+    extra = os.environ.get("EXTRA_CA_CERTS")
+    if not extra:
+        default_extra = ROOT / "certs" / "amd-zscaler-ca.pem"
+        extra = str(default_extra) if default_extra.exists() else ""
+    if not extra or not Path(extra).exists():
+        return
+    try:
+        system = None
+        for cand in (ssl.get_default_verify_paths().cafile,
+                     "/etc/ssl/certs/ca-certificates.crt"):
+            if cand and Path(cand).exists():
+                system = Path(cand)
+                break
+        combined = ROOT / "certs" / "combined-ca.pem"
+        blob = b""
+        if system:
+            blob += system.read_bytes() + b"\n"
+        blob += Path(extra).read_bytes() + b"\n"
+        combined.parent.mkdir(parents=True, exist_ok=True)
+        combined.write_bytes(blob)
+        os.environ["SSL_CERT_FILE"] = str(combined)
+        os.environ.setdefault("REQUESTS_CA_BUNDLE", str(combined))
+    except OSError:
+        pass
 
 
 def flatten_skills(profile: dict) -> list:
@@ -260,6 +300,7 @@ def generate(
     profile_rebuilt = result.profile_source in ("provided", "parsed")
     if save_profile and profile_rebuilt:
         store.save_profile(profile, store_path)
+        store.archive_profile(profile, source=result.profile_source)  # keep history
         store.clear_optimized(optimized_path)  # new resume -> discard prior draft
         if raw_context:
             store.save_context(raw_context, context_path)

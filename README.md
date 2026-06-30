@@ -1,11 +1,17 @@
-# Resume LaTeX Pipeline
+# Resume LaTeX Pipeline + Daily Digest
 
-A pipeline that maps a JSON user profile and a target job description into a
-clean, compilation-ready LaTeX resume using the Jake Gutierrez (`sb2nov`-derived)
-template. By default, **Claude (Anthropic) is the optimizer** -- it tailors the
-resume to the job to maximize interview odds -- and the result is rendered
-deterministically and auto-fit to a single page. A fully deterministic mode (no
-LLM) is also available.
+Two independent tools served from one local app (switch with the tabs at the top):
+
+1. **ResumeForge** — maps a JSON user profile and a target job description into a
+   clean, compilation-ready LaTeX resume using the Jake Gutierrez (`sb2nov`-derived)
+   template. By default, **Claude (Anthropic) is the optimizer** and the result is
+   rendered deterministically and auto-fit to a single page.
+2. **Daily Digest** — feed it info about yourself, your goals, and your daily tasks,
+   log updates as they happen, and it emails you a compartmentalized morning digest
+   of what's new and what to do today. See [Daily Digest](#daily-digest) below.
+
+The Daily Digest is fully isolated in `digest_pipeline/` and `web/digest.{css,js}`;
+it shares only the `.env` (LLM gateway) and the local server process.
 
 ## How it works
 
@@ -127,12 +133,13 @@ profile/context area (required only on the first run, when no profile is stored)
 and a job-description field, with a live one-page PDF preview and downloads.
 
 ```bash
-python3 server.py            # then open http://127.0.0.1:8000
+python3 server.py            # then open http://127.0.0.1:8765
 ```
 
 It reads the same `.env` (key, gateway, model), auto-detects whether a profile is
 stored, runs the LLM optimization (or offline mode via the toggle), compiles to a
-single page, and previews the PDF inline. Stdlib-only (no web framework).
+single page, and previews the PDF inline. Stdlib-only (no web framework). Use the
+tabs at the top to switch between **Resume** and **Daily Digest**.
 
 The Context area accepts any of: a **PDF resume** (uploaded), **plain resume
 text**, free-form **notes**, or a **profile JSON**. Free text / PDFs are parsed by
@@ -152,6 +159,92 @@ If a gap actually applies to you, add the real details (per-gap inputs or
 `--notes "..."`). Those notes are **appended to your stored context** (not used to
 rebuild the profile), so every regeneration has more truthful material to work with
 and the gaps shrink. Repeat until the resume covers the role.
+
+## Daily Digest
+
+A separate engine (open the **Daily Digest** tab) that emails you a
+compartmentalized morning digest of what's new and what to do today.
+
+**What you give it** (saved and reused every morning):
+- **About you** — role, context, working style.
+- **Goals** — longer-term objectives.
+- **Recurring / standing tasks** — what you do daily/weekly.
+- **Updates** — short notes you log as things happen. Each digest summarizes these
+  into a "What's New" section and then clears them, so tomorrow only shows new ones.
+
+**What it produces:** a clean, sectioned digest (Today's Focus, Tasks, What's New,
+Goal Progress, Reminders) rendered as an HTML email, composed by the LLM (or a plain
+deterministic layout in **Offline mode** / when no key is set).
+
+**Delivery:** set a recipient and send time in the UI, flip on **Morning auto-send**,
+and a background scheduler emails it each morning *while the server is running* (it
+catches up if the machine was asleep at the exact time, as long as the server is up
+later that morning). Use **Preview digest** to see it, or **Send now** to test.
+
+**Email setup** (one time, in `.env` — secrets stay out of the UI):
+
+```bash
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=you@gmail.com
+SMTP_PASSWORD=your-app-password     # Gmail: an App Password, not your login
+SMTP_FROM=you@gmail.com
+SMTP_SECURITY=starttls              # starttls (default) | ssl | none
+```
+
+### Modules
+
+- **Schedule → Calendar.** Paste your planner (numbers = hours, e.g. `11` = 11 AM;
+  tabbed lines = tasks/subtasks; a leading `'` marks important). It's parsed into a
+  time-blocked day (no information loss — every task/subtask is preserved in the
+  digest) and can be **pushed to Google Calendar**. The calendar account is set via
+  `GOOGLE_*` env vars and is switchable any time.
+- **Trackers** (add as many as you like, any time):
+  - `github` — new issues/PRs in a repo (optional `GITHUB_TOKEN`).
+  - `web` — watch a page/careers site for keywords (e.g. NVIDIA + `intern`) or any change.
+  - `inbox` — recent/unread emails via IMAP (`IMAP_*`).
+  New findings appear in the digest's "What's New" and only NEW items are reported.
+- **Korean practice.** A daily TOPIK lesson (vocab + grammar) at your level; past
+  entries are saved so content never repeats.
+
+### Memory (the "Memory" tab)
+
+A persistent, editable store of long-term context about you that personalizes every
+digest. It grows over time and is fully under your control:
+
+- **Upload a resume** (PDF or text) — durable facts (role, education, skills,
+  projects, achievements) are distilled into individual memories.
+- **Natural language** — "I switched teams to X", "remember I prefer morning
+  deep-work", "forget the bit about Y". An LLM turns it into precise add/update/remove
+  operations on your memory list.
+- **Direct editing** — double-click a memory to edit, click its category to change
+  it, or delete it. Filter by category.
+
+Memories are stored in `data/digest/memory.json` and fed to the digest composer as
+long-term context.
+
+### Google Calendar (optional, account-switchable)
+
+Add OAuth creds to `.env` (works with any Google account; change these to switch
+accounts — no code change):
+
+```bash
+GOOGLE_CLIENT_ID=...
+GOOGLE_CLIENT_SECRET=...
+GOOGLE_REFRESH_TOKEN=...           # one-time consent (e.g. OAuth Playground)
+GOOGLE_CALENDAR_ID=primary
+GOOGLE_TIMEZONE=America/New_York
+```
+
+### Choosing the model
+
+Both the resume tab and the digest use the Anthropic Messages API via the gateway
+in `.env` (`ANTHROPIC_BASE_URL`), defaulting to `claude-opus-4-8`. Override globally
+with `ANTHROPIC_MODEL`, or per run via the Model dropdown in each tab. (Non-Anthropic
+models like GPT require an OpenAI-compatible endpoint — see notes.)
+
+Data is stored under `data/digest/` (config, updates, schedule, korean history,
+trackers, run state), fully separate from the resume pipeline's files.
 
 ## Usage (CLI)
 

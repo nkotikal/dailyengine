@@ -1,6 +1,9 @@
 # Secrets / local env
 .env
 
+# Generated combined CA bundle (regenerated at startup; machine-specific)
+/certs/combined-ca.pem
+
 # Stored personal profile
 /data/
 

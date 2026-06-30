@@ -3,8 +3,9 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ResumeForge - tailored, one-page, ATS-ready</title>
+  <title>ResumeForge - resume + daily digest</title>
   <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/digest.css" />
 </head>
 <body>
   <!-- animated liquid-glass backdrop -->
@@ -19,11 +20,19 @@
     <header class="hero">
       <div class="hero-mark">RF</div>
       <div>
-        <h1>ResumeForge</h1>
-        <p class="tagline">Paste a job description. Get a tailored, one-page, ATS-ready resume.</p>
+        <h1 id="app-title">ResumeForge</h1>
+        <p class="tagline" id="app-tagline">Paste a job description. Get a tailored, one-page, ATS-ready resume.</p>
       </div>
     </header>
 
+    <nav class="tabs" role="tablist">
+      <button class="tab active" id="tab-resume" type="button" role="tab" aria-selected="true">Resume</button>
+      <button class="tab" id="tab-digest" type="button" role="tab" aria-selected="false">Daily Digest</button>
+      <button class="tab" id="tab-memory" type="button" role="tab" aria-selected="false">Memory</button>
+    </nav>
+
+    <!-- ===================== RESUME VIEW ===================== -->
+    <div class="view" id="view-resume">
     <section class="chips" id="status-chips" aria-live="polite"></section>
 
     <div class="grid">
@@ -158,9 +167,448 @@
       </button>
     </section>
 
+    <!-- SAVED PROFILE & HISTORY -->
+    <section class="glass panel" id="saved-profile-panel">
+      <div class="section-head">
+        <h2>Saved profile</h2>
+        <div class="head-actions">
+          <span class="pill ghost" id="sp-name" hidden></span>
+          <button class="link-btn" id="sp-refresh" type="button">Refresh</button>
+        </div>
+      </div>
+      <p class="hint" id="sp-hint">View and edit your current saved profile, or restore an older version.</p>
+
+      <div class="sp-editor" id="sp-editor" hidden>
+        <label class="micro" for="sp-json">Profile JSON (edit any field, then save)</label>
+        <textarea id="sp-json" class="field mono" spellcheck="false"></textarea>
+        <div class="row-actions">
+          <div class="sp-actions">
+            <button class="generate" id="sp-save" type="button">
+              <span class="btn-label">Save changes</span><span class="spinner" hidden></span>
+            </button>
+            <button class="btn-glass subtle" id="sp-format" type="button">Reformat</button>
+            <button class="btn-glass subtle" id="sp-revert" type="button">Revert</button>
+          </div>
+          <span class="micro" id="sp-status"></span>
+        </div>
+        <p class="micro sp-note">Saving updates your base profile and starts the next tailoring fresh from it (the prior AI-optimized draft is cleared).</p>
+      </div>
+
+      <div class="section-head spaced">
+        <h2>Version history</h2>
+        <span class="pill ghost" id="sp-version-count">0</span>
+      </div>
+      <p class="hint">Every time your profile is saved or rebuilt, a snapshot is kept here.</p>
+      <div class="sp-versions" id="sp-versions"></div>
+      <div class="sp-version-view" id="sp-version-view" hidden>
+        <div class="section-head"><h2 class="sp-vv-title" id="sp-vv-title">Version</h2></div>
+        <pre class="tex-view mono" id="sp-vv-json"></pre>
+        <div class="sp-actions">
+          <button class="generate" id="sp-vv-restore" type="button">Restore this version</button>
+          <button class="btn-glass subtle" id="sp-vv-close" type="button">Close</button>
+        </div>
+      </div>
+    </section>
+
     <footer class="foot">Single column - standard headings - selectable text - auto-fit to one page.</footer>
+    </div>
+    <!-- =================== END RESUME VIEW =================== -->
+
+    <!-- ===================== DIGEST VIEW ===================== -->
+    <div class="view" id="view-digest" hidden>
+      <section class="chips" id="digest-chips" aria-live="polite"></section>
+
+      <div class="grid">
+        <!-- LEFT: inputs -->
+        <section class="glass panel">
+          <div class="section-head">
+            <h2>About you</h2>
+            <span class="pill ghost">used every morning</span>
+          </div>
+          <p class="hint">Tell the engine who you are, what you're working toward, and your standing tasks. This is reused for every digest.</p>
+
+          <label class="d-label" for="d-about">About you / context</label>
+          <textarea id="d-about" class="field" spellcheck="false"
+            placeholder="Who you are, your role, working style, priorities, constraints (e.g. focus hours)..."></textarea>
+
+          <label class="d-label" for="d-weekly-goals">Goals this week</label>
+          <textarea id="d-weekly-goals" class="field mono" spellcheck="false"
+            placeholder="What you want to get done this week. One per line; tab a line under another to make it a subtask, e.g.&#10;Finish AMD PR&#10;&#9;Inspect outputs&#10;&#9;Rerun models"></textarea>
+
+          <label class="d-label" for="d-longterm-goals">Long-term goals (with target dates)</label>
+          <textarea id="d-longterm-goals" class="field" spellcheck="false"
+            placeholder="Bigger goals with target dates, e.g.&#10;Ship Dailyengine v1 - by Aug 15&#10;Reach TOPIK level 4 - by Dec 2026"></textarea>
+
+          <label class="d-label" for="d-tasks">Recurring / standing tasks</label>
+          <textarea id="d-tasks" class="field mono" spellcheck="false"
+            placeholder="Things you do daily/weekly. One per line; tab to nest subtasks, e.g.&#10;Review inbox&#10;Stand-up at 9:30&#10;Gym&#10;&#9;Upper body"></textarea>
+
+          <div class="row-actions">
+            <button class="link-btn" id="d-save" type="button">Save details</button>
+            <span class="micro" id="d-save-status"></span>
+          </div>
+
+          <div class="section-head spaced">
+            <h2>Updates</h2>
+            <span class="pill ghost" id="d-pending-pill">0 new</span>
+          </div>
+          <p class="hint">Log updates as they happen. The next digest summarizes these as "What's New", then clears them.</p>
+          <div class="upload-row">
+            <input type="text" id="d-update-input" class="field d-update-input"
+              placeholder="e.g. Client moved the demo to Thursday" />
+            <button class="btn-glass" id="d-add-update" type="button">Add</button>
+          </div>
+          <div class="d-updates" id="d-updates"></div>
+        </section>
+
+        <!-- RIGHT: delivery + preview -->
+        <section class="glass panel">
+          <div class="section-head">
+            <h2>Delivery</h2>
+            <span class="pill" id="d-email-pill">checking...</span>
+          </div>
+
+          <label class="d-label" for="d-email-to">Send to</label>
+          <input type="email" id="d-email-to" class="field" placeholder="you@example.com" />
+
+          <div class="options">
+            <label class="select-wrap">
+              <span>Send time (local)</span>
+              <input type="time" id="d-send-time" class="field" value="07:00" />
+            </label>
+            <label class="select-wrap" title="Realistic focus hours per day - used to flag overloaded days and protect your headspace.">
+              <span>Focus capacity (h/day)</span>
+              <input type="number" id="d-capacity" class="field" min="1" max="16" step="0.5" value="6" />
+            </label>
+            <label class="select-wrap">
+              <span>Model</span>
+              <select id="d-model" class="field select">
+                <option value="">Default</option>
+                <option value="claude-opus-4-8">Claude Opus 4.8 (best)</option>
+                <option value="claude-sonnet-4-6">Claude Sonnet 4.6 (fast)</option>
+                <option value="claude-haiku-4-5">Claude Haiku 4.5 (fastest)</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="options">
+            <label class="switch-wrap" title="Email a digest automatically every morning.">
+              <span>Morning auto-send</span>
+              <span class="switch">
+                <input type="checkbox" id="d-enabled" />
+                <span class="track"><span class="thumb"></span></span>
+              </span>
+            </label>
+            <label class="switch-wrap" title="Skip the AI and build a plain digest from your inputs.">
+              <span>Offline mode</span>
+              <span class="switch">
+                <input type="checkbox" id="d-offline" />
+                <span class="track"><span class="thumb"></span></span>
+              </span>
+            </label>
+          </div>
+
+          <div class="d-include-row">
+            <span class="micro">Include in digest:</span>
+            <label class="d-check"><input type="checkbox" id="d-inc-schedule" checked /> Schedule</label>
+            <label class="d-check"><input type="checkbox" id="d-inc-calendar" checked /> Calendar</label>
+            <label class="d-check"><input type="checkbox" id="d-inc-trackers" checked /> Trackers</label>
+            <label class="d-check"><input type="checkbox" id="d-korean" /> Korean</label>
+          </div>
+
+          <div class="d-actions">
+            <button class="generate" id="d-preview" type="button">
+              <span class="btn-label">Preview digest</span>
+              <span class="spinner" hidden></span>
+            </button>
+            <button class="btn-glass" id="d-send" type="button">
+              <span class="btn-label">Send now</span>
+              <span class="spinner" hidden></span>
+            </button>
+          </div>
+
+          <div class="d-schedule-note" id="d-schedule-note"></div>
+          <div class="error" id="d-error" hidden></div>
+
+          <div class="d-preview-wrap" id="d-preview-wrap" hidden>
+            <div class="section-head spaced">
+              <h2>Preview</h2>
+              <span class="pill ghost" id="d-preview-meta" hidden></span>
+            </div>
+            <iframe id="d-preview-frame" title="Digest email preview"></iframe>
+          </div>
+        </section>
+      </div>
+
+      <!-- WEEKLY TASKS -->
+      <section class="glass panel">
+        <div class="section-head">
+          <h2>Weekly tasks</h2>
+          <span class="pill ghost" id="d-wt-pill">0 tasks</span>
+        </div>
+        <p class="hint">Build a checkable task list from your <strong>Goals this week</strong> box above - the engine breaks the goals into concrete tasks, and <strong>tab-indented lines become subtasks</strong>. Then add, edit, complete, or delete tasks and subtasks freely. Open tasks drive each day's "Today's Focus".</p>
+        <div class="d-actions">
+          <button class="generate" id="d-wt-derive" type="button">
+            <span class="btn-label">Build from "Goals this week"</span><span class="spinner" hidden></span>
+          </button>
+          <button class="btn-glass" id="d-wt-clear-done" type="button">Clear completed</button>
+          <button class="btn-glass" id="d-wt-clear-all" type="button">Clear all</button>
+        </div>
+        <div class="d-wt-list" id="d-wt-list"></div>
+        <button class="link-btn d-wt-addtoggle" id="d-wt-addtoggle" type="button">+ Add task</button>
+        <div class="d-wt-addrow" id="d-wt-addrow" hidden>
+          <input type="text" id="d-wt-input" class="field d-update-input" placeholder="Task..." />
+          <select id="d-wt-priority" class="field select d-wt-prio" title="Importance">
+            <option value="high">High</option>
+            <option value="medium" selected>Medium</option>
+            <option value="low">Low</option>
+          </select>
+          <input type="date" id="d-wt-due" class="field d-wt-due-in" title="Due date" />
+          <input type="text" id="d-wt-est" class="field d-wt-est-in" placeholder="est" title="Estimated time" />
+          <button class="btn-glass" id="d-wt-add" type="button">Add</button>
+        </div>
+        <div class="error" id="d-wt-error" hidden></div>
+      </section>
+
+      <!-- SCHEDULE -->
+      <section class="glass panel">
+        <div class="section-head">
+          <h2>Schedule &rarr; Calendar</h2>
+          <span class="pill" id="d-cal-pill">checking...</span>
+        </div>
+        <p class="hint">Paste your planner. Numbers are hours (11 = 11 AM), tabbed lines are tasks/subtasks, and a leading <code>'</code> marks something important. It's parsed into your day and can be pushed to Google Calendar.</p>
+        <textarea id="d-schedule" class="field mono" spellcheck="false" placeholder="11&#10;&#9;'AMD PR&#10;&#9;&#9;Inspect outputs&#10;12&#10;&#9;Lunch&#10;1&#10;&#9;Continue AMD PR"></textarea>
+        <div class="d-actions">
+          <button class="generate" id="d-parse" type="button">
+            <span class="btn-label">Parse &amp; save</span><span class="spinner" hidden></span>
+          </button>
+          <button class="btn-glass" id="d-push-cal" type="button">Push to Google Calendar</button>
+        </div>
+        <div class="d-schedule-note" id="d-cal-note"></div>
+        <div class="d-parsed" id="d-parsed" hidden></div>
+      </section>
+
+      <!-- TRACKERS -->
+      <section class="glass panel">
+        <div class="section-head">
+          <h2>Trackers</h2>
+          <span class="pill ghost" id="d-trackers-pill">0 active</span>
+        </div>
+        <p class="hint">Watch things and get "new developments" in your digest: GitHub issues/PRs, a web page or careers site for keywords (e.g. NVIDIA + "intern"), or your inbox.</p>
+        <div class="d-tracker-list" id="d-tracker-list"></div>
+
+        <div class="d-tracker-add">
+          <div class="options">
+            <label class="select-wrap">
+              <span>Type</span>
+              <select id="d-tracker-type" class="field select"></select>
+            </label>
+            <label class="select-wrap">
+              <span>Name</span>
+              <input type="text" id="d-tracker-name" class="field" placeholder="e.g. NVIDIA internships" />
+            </label>
+          </div>
+          <div id="d-tracker-fields" class="d-tracker-fields"></div>
+          <div class="d-actions">
+            <button class="btn-glass" id="d-tracker-test" type="button">Test</button>
+            <button class="generate" id="d-tracker-save" type="button">
+              <span class="btn-label">Add tracker</span><span class="spinner" hidden></span>
+            </button>
+          </div>
+          <div class="d-tracker-results" id="d-tracker-results" hidden></div>
+        </div>
+      </section>
+
+      <!-- KOREAN -->
+      <section class="glass panel">
+        <div class="section-head">
+          <h2>Korean practice</h2>
+          <span class="pill ghost" id="d-korean-pill">off</span>
+        </div>
+        <p class="hint">A structured TOPIK II track: it walks an ordered grammar syllabus and vocab deck, mixes in spaced-repetition reviews of past items, and the AI writes the examples. Past entries are remembered so nothing repeats.</p>
+        <div class="d-korean-progress" id="d-korean-progress"></div>
+        <div class="options">
+          <label class="select-wrap">
+            <span>Level / placement</span>
+            <select id="d-korean-level" class="field select">
+              <option value="beginner">Beginner (start of TOPIK II)</option>
+              <option value="intermediate" selected>Intermediate (TOPIK 3-4)</option>
+              <option value="intermediate-high">Intermediate-high (jump into TOPIK 4)</option>
+              <option value="advanced">Advanced (TOPIK 4+)</option>
+            </select>
+          </label>
+          <label class="select-wrap">
+            <span>&nbsp;</span>
+            <button class="btn-glass subtle" id="d-korean-place" type="button">Set placement</button>
+          </label>
+        </div>
+        <div class="d-actions">
+          <button class="generate" id="d-korean-preview" type="button">
+            <span class="btn-label">Preview today's lesson</span><span class="spinner" hidden></span>
+          </button>
+        </div>
+        <div class="d-korean-out" id="d-korean-out" hidden></div>
+      </section>
+
+      <!-- REMINDERS / DEADLINES -->
+      <section class="glass panel">
+        <div class="section-head">
+          <h2>Reminders &amp; deadlines</h2>
+          <span class="pill ghost" id="d-reminders-pill">0 active</span>
+        </div>
+        <p class="hint">Dated reminders persist and resurface in every digest until done. They escalate to high priority as the date nears (and are flagged when overdue).</p>
+        <div class="d-reminder-list" id="d-reminder-list"></div>
+        <div class="d-reminder-add">
+          <div class="options">
+            <label class="select-wrap">
+              <span>Reminder</span>
+              <input type="text" id="d-reminder-text" class="field" placeholder="e.g. Submit AMD PR" />
+            </label>
+            <label class="select-wrap">
+              <span>Due date (optional)</span>
+              <input type="date" id="d-reminder-due" class="field" />
+            </label>
+            <label class="select-wrap">
+              <span>Priority</span>
+              <select id="d-reminder-priority" class="field select">
+                <option value="low">Low</option>
+                <option value="medium" selected>Medium</option>
+                <option value="high">High</option>
+              </select>
+            </label>
+          </div>
+          <div class="d-actions">
+            <button class="generate" id="d-reminder-add" type="button">
+              <span class="btn-label">Add reminder</span><span class="spinner" hidden></span>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- HEADLINES & INTERESTS -->
+      <section class="glass panel">
+        <div class="section-head">
+          <h2>Headlines &amp; interests</h2>
+          <label class="switch-wrap" title="Include a Headlines section in the digest.">
+            <span>Include</span>
+            <span class="switch"><input type="checkbox" id="d-news-enabled" />
+              <span class="track"><span class="thumb"></span></span></span>
+          </label>
+        </div>
+        <p class="hint">Top stories from your sources, filtered to your interests. You can also refine interests by replying to the email (e.g. "more compilers, less crypto").</p>
+
+        <label class="d-label" for="d-interests">Interests (comma-separated)</label>
+        <input type="text" id="d-interests" class="field" placeholder="compilers, GPU kernels, ML systems, startups" />
+
+        <label class="d-label">Sources</label>
+        <div class="d-tracker-list" id="d-news-list"></div>
+        <div class="upload-row">
+          <select id="d-news-type" class="field select" style="max-width:200px"></select>
+          <input type="text" id="d-news-name" class="field" placeholder="Name (optional)" />
+          <input type="text" id="d-news-url" class="field" placeholder="URL (optional)" />
+          <button class="btn-glass" id="d-news-add" type="button">Add source</button>
+        </div>
+        <div class="d-actions">
+          <button class="generate" id="d-news-save" type="button">
+            <span class="btn-label">Save interests &amp; sources</span><span class="spinner" hidden></span>
+          </button>
+          <button class="btn-glass" id="d-replies-process" type="button">Process email replies now</button>
+        </div>
+        <div class="d-tracker-results" id="d-news-note" hidden></div>
+      </section>
+
+      <!-- CLEAR / RESET -->
+      <section class="glass panel">
+        <div class="section-head">
+          <h2>Clear &amp; reset</h2>
+        </div>
+        <p class="hint">Wipe a single category, or reset all content at once. Your delivery settings (email, send time, focus capacity, model) are kept.</p>
+        <div class="d-reset-grid">
+          <button class="btn-glass subtle" data-clear="tasks" type="button">Daily tasks</button>
+          <button class="btn-glass subtle" data-clear="weekly_tasks" type="button">Weekly tasks</button>
+          <button class="btn-glass subtle" data-clear="weekly_goals" type="button">Weekly goals</button>
+          <button class="btn-glass subtle" data-clear="longterm_goals" type="button">Long-term goals</button>
+          <button class="btn-glass subtle" data-clear="about" type="button">About you</button>
+          <button class="btn-glass subtle" data-clear="schedule" type="button">Schedule</button>
+          <button class="btn-glass subtle" data-clear="updates" type="button">Updates</button>
+          <button class="btn-glass subtle" data-clear="reminders" type="button">Reminders</button>
+          <button class="btn-glass subtle" data-clear="trackers" type="button">Trackers</button>
+          <button class="btn-glass subtle" data-clear="memory" type="button">Memory</button>
+          <button class="btn-glass subtle" data-clear="korean" type="button">Korean progress</button>
+        </div>
+        <button class="generate d-danger" id="d-reset-all" type="button">
+          <span class="btn-label">Reset ALL content</span>
+        </button>
+        <div class="error" id="d-reset-error" hidden></div>
+      </section>
+
+      <footer class="foot">Runs locally - emails a compartmentalized morning digest while this server is running.</footer>
+    </div>
+    <!-- =================== END DIGEST VIEW =================== -->
+
+    <!-- ===================== MEMORY VIEW ===================== -->
+    <div class="view" id="view-memory" hidden>
+      <section class="chips" id="memory-chips" aria-live="polite"></section>
+
+      <div class="grid">
+        <!-- LEFT: add to memory -->
+        <section class="glass panel">
+          <div class="section-head">
+            <h2>Teach it about you</h2>
+            <span class="pill ghost">grows over time</span>
+          </div>
+          <p class="hint">Everything here is saved as long-term context and used to personalize your digest. Build it up, prune it, or reshape it any time - directly or in plain language.</p>
+
+          <label class="d-label">Upload a resume (extra context)</label>
+          <div class="upload-row">
+            <label class="btn-glass subtle upload-btn">
+              <span>Upload resume</span>
+              <input type="file" id="m-resume-file" accept=".pdf,.txt,.md" hidden />
+            </label>
+            <span class="file-chip" id="m-file-chip" hidden></span>
+            <span class="micro">PDF or text - durable facts are extracted into memories</span>
+          </div>
+          <textarea id="m-resume-text" class="field" spellcheck="false"
+            placeholder="...or paste resume / bio text here"></textarea>
+          <div class="d-actions">
+            <button class="generate" id="m-ingest" type="button">
+              <span class="btn-label">Add to memory</span><span class="spinner" hidden></span>
+            </button>
+          </div>
+
+          <div class="section-head spaced">
+            <h2>Talk to your memory</h2>
+          </div>
+          <p class="hint">Natural language: "I no longer work on X", "remember I prefer morning deep-work", "I switched teams to Y", "forget the bit about Z".</p>
+          <textarea id="m-command" class="field" spellcheck="false"
+            placeholder="Tell it what to remember, change, or forget..."></textarea>
+          <div class="d-actions">
+            <button class="generate" id="m-apply" type="button">
+              <span class="btn-label">Apply</span><span class="spinner" hidden></span>
+            </button>
+            <button class="btn-glass" id="m-add-direct" type="button">Add as one memory</button>
+          </div>
+          <div class="d-tracker-results" id="m-change-note" hidden></div>
+          <div class="error" id="m-error" hidden></div>
+        </section>
+
+        <!-- RIGHT: current memory -->
+        <section class="glass panel">
+          <div class="section-head">
+            <h2>What it remembers</h2>
+            <span class="pill ghost" id="m-count-pill">0 memories</span>
+          </div>
+          <div class="m-filter" id="m-filter"></div>
+          <div class="m-list" id="m-list"></div>
+        </section>
+      </div>
+
+      <footer class="foot">Long-term memory is saved locally and woven into every digest.</footer>
+    </div>
+    <!-- =================== END MEMORY VIEW =================== -->
   </main>
 
   <script src="/app.js"></script>
+  <script src="/digest.js"></script>
 </body>
 </html>

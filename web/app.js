@@ -125,6 +125,7 @@ async function clearProfile() {
     $("result-empty").hidden = false;
     $("gaps-panel").hidden = true;
     await loadStatus();
+    loadSavedProfile();
     if ($("profile-wrap").hidden) toggleProfile();
   } catch (e) {
     showError("Could not clear the saved profile: " + e.message);
@@ -274,6 +275,7 @@ async function generate(opts) {
 
     // refresh status (profile may now be stored)
     loadStatus();
+    loadSavedProfile();
   } catch (e) {
     showError("Network error: " + e.message);
   } finally {
@@ -453,6 +455,148 @@ async function onFile(e) {
   }
 }
 
+// ---- saved profile: view / edit / history ----
+let spOriginal = "";
+
+async function loadSavedProfile() {
+  try {
+    const r = await fetch("/api/profile");
+    const data = await r.json();
+    if (!data.ok) return;
+    const nameEl = $("sp-name");
+    if (data.has_profile) {
+      nameEl.hidden = false;
+      nameEl.textContent = data.name || "unnamed";
+      $("sp-editor").hidden = false;
+      spOriginal = JSON.stringify(data.profile, null, 2);
+      // Don't clobber unsaved edits on a passive refresh.
+      if (!$("sp-json").value || $("sp-json").value === spOriginal) {
+        $("sp-json").value = spOriginal;
+      }
+      $("sp-hint").textContent = "View and edit your current saved profile, or restore an older version.";
+    } else {
+      nameEl.hidden = true;
+      $("sp-editor").hidden = true;
+      $("sp-hint").textContent = "No profile saved yet. Generate a resume (or paste a profile) to create one.";
+    }
+    renderVersions(data.versions || []);
+  } catch (e) { /* leave panel as-is */ }
+}
+
+function renderVersions(versions) {
+  $("sp-version-count").textContent = String(versions.length);
+  const wrap = $("sp-versions");
+  if (!versions.length) {
+    wrap.innerHTML = `<div class="sp-versions-empty">No saved versions yet.</div>`;
+    return;
+  }
+  wrap.innerHTML = versions.map((v, i) => `
+    <div class="sp-version-item">
+      <div>
+        <div class="sp-vi-meta">${escapeHtml(v.name || "unnamed")}${i === 0 ? " · current" : ""}</div>
+        <div class="sp-vi-sub">${escapeHtml(v.saved_at)}${v.source ? " · " + escapeHtml(v.source) : ""}</div>
+      </div>
+      <div class="sp-vi-controls">
+        <button class="link-btn sp-view" data-id="${escapeHtml(v.id)}" type="button">View</button>
+        <button class="link-btn sp-restore" data-id="${escapeHtml(v.id)}" type="button">Restore</button>
+        <button class="link-btn danger sp-del" data-id="${escapeHtml(v.id)}" type="button">Delete</button>
+      </div>
+    </div>`).join("");
+  wrap.querySelectorAll(".sp-view").forEach((b) => b.addEventListener("click", () => viewVersion(b.dataset.id)));
+  wrap.querySelectorAll(".sp-restore").forEach((b) => b.addEventListener("click", () => restoreVersion(b.dataset.id)));
+  wrap.querySelectorAll(".sp-del").forEach((b) => b.addEventListener("click", () => deleteVersion(b.dataset.id)));
+}
+
+function spStatus(msg) {
+  const el = $("sp-status");
+  el.textContent = msg;
+  if (msg) setTimeout(() => { if (el.textContent === msg) el.textContent = ""; }, 3000);
+}
+
+async function saveProfileEdits() {
+  showError("");
+  let parsed;
+  try {
+    parsed = JSON.parse($("sp-json").value);
+  } catch (e) {
+    showError("Profile is not valid JSON: " + e.message);
+    return;
+  }
+  if (typeof parsed !== "object" || Array.isArray(parsed) || parsed === null) {
+    showError("Profile must be a JSON object.");
+    return;
+  }
+  const btn = $("sp-save");
+  setBusy2(btn, true, "Save changes");
+  try {
+    const r = await fetch("/api/profile/save", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ profile: parsed }),
+    });
+    const data = await r.json();
+    if (!data.ok) { showError(data.error || "Save failed."); return; }
+    spStatus("Saved");
+    loadSavedProfile();
+    if (typeof loadStatus === "function") loadStatus();
+  } catch (e) { showError("Network error: " + e.message); }
+  finally { setBusy2(btn, false, "Save changes"); }
+}
+
+function setBusy2(btn, busy, label) {
+  btn.disabled = busy;
+  const l = btn.querySelector(".btn-label");
+  if (l) l.textContent = busy ? "Working..." : label;
+  const sp = btn.querySelector(".spinner");
+  if (sp) sp.hidden = !busy;
+}
+
+let spViewingId = null;
+async function viewVersion(id) {
+  showError("");
+  try {
+    const r = await fetch("/api/profile/version", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }),
+    });
+    const data = await r.json();
+    if (!data.ok) { showError(data.error || "Could not load version."); return; }
+    spViewingId = id;
+    $("sp-vv-title").textContent = "Version " + id;
+    $("sp-vv-json").textContent = JSON.stringify(data.profile, null, 2);
+    $("sp-version-view").hidden = false;
+    $("sp-version-view").scrollIntoView({ behavior: "smooth", block: "nearest" });
+  } catch (e) { showError("Network error: " + e.message); }
+}
+
+async function restoreVersion(id) {
+  if (!confirm("Restore this version as your current profile? Your current profile is already snapshotted in history.")) return;
+  showError("");
+  try {
+    const r = await fetch("/api/profile/restore", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }),
+    });
+    const data = await r.json();
+    if (!data.ok) { showError(data.error || "Restore failed."); return; }
+    $("sp-json").value = JSON.stringify(data.profile, null, 2);
+    spOriginal = $("sp-json").value;
+    $("sp-version-view").hidden = true;
+    spStatus("Restored");
+    loadSavedProfile();
+    if (typeof loadStatus === "function") loadStatus();
+  } catch (e) { showError("Network error: " + e.message); }
+}
+
+async function deleteVersion(id) {
+  if (!confirm("Delete this saved version permanently?")) return;
+  try {
+    const r = await fetch("/api/profile/version/delete", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }),
+    });
+    const data = await r.json();
+    renderVersions(data.versions || []);
+    if (spViewingId === id) $("sp-version-view").hidden = true;
+  } catch (e) { showError("Network error: " + e.message); }
+}
+
 function init() {
   loadStatus();
   $("profile-toggle").addEventListener("click", toggleProfile);
@@ -476,6 +620,18 @@ function init() {
     $("toggle-tex").textContent = wrap.hidden ? "Edit LaTeX" : "Hide LaTeX";
   });
   $("recompile-tex").addEventListener("click", recompileTex);
+
+  // saved profile / history
+  $("sp-refresh").addEventListener("click", loadSavedProfile);
+  $("sp-save").addEventListener("click", saveProfileEdits);
+  $("sp-format").addEventListener("click", () => {
+    try { $("sp-json").value = JSON.stringify(JSON.parse($("sp-json").value), null, 2); showError(""); }
+    catch (e) { showError("Can't reformat — invalid JSON: " + e.message); }
+  });
+  $("sp-revert").addEventListener("click", () => { $("sp-json").value = spOriginal; spStatus("Reverted"); });
+  $("sp-vv-close").addEventListener("click", () => { $("sp-version-view").hidden = true; });
+  $("sp-vv-restore").addEventListener("click", () => { if (spViewingId) restoreVersion(spViewingId); });
+  loadSavedProfile();
 }
 
 document.addEventListener("DOMContentLoaded", init);

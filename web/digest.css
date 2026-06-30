@@ -1,0 +1,214 @@
+/* Daily Digest UI - isolated styles (reuses the liquid-glass tokens from styles.css) */
+
+/* ---- tabs ---- */
+.tabs {
+  display: inline-flex;
+  gap: 4px;
+  padding: 5px;
+  margin-bottom: 22px;
+  border-radius: 999px;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-brd);
+  backdrop-filter: blur(18px) saturate(160%);
+  -webkit-backdrop-filter: blur(18px) saturate(160%);
+}
+.tab {
+  appearance: none;
+  border: none;
+  cursor: pointer;
+  padding: 9px 20px;
+  border-radius: 999px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-soft);
+  background: transparent;
+  transition: color 0.2s, background 0.2s;
+}
+.tab:hover { color: var(--text); }
+.tab.active {
+  color: #0c0d1c;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  box-shadow: 0 6px 18px rgba(124, 109, 255, 0.4);
+}
+
+.view[hidden] { display: none; }
+
+/* ---- digest inputs ---- */
+.d-label {
+  display: block;
+  font-size: 12.5px;
+  color: var(--text-soft);
+  margin: 14px 0 6px;
+  font-weight: 550;
+}
+#view-digest textarea.field { min-height: 120px; }
+#d-about { min-height: 150px; }
+#d-weekly-goals, #d-longterm-goals, #d-tasks { min-height: 130px; }
+
+.d-update-input { flex: 1; }
+
+.d-updates { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+.d-update {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 10px;
+  padding: 10px 12px; border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.20);
+  border: 1px solid var(--glass-brd);
+}
+.d-update-text { font-size: 13.5px; line-height: 1.45; color: var(--text); }
+.d-update-time { font-size: 11px; color: var(--text-faint); margin-top: 3px; }
+.d-update-x {
+  cursor: pointer; flex: 0 0 auto; font-size: 18px; line-height: 1;
+  color: var(--text-soft); background: none; border: none; padding: 0 2px;
+}
+.d-update-x:hover { color: var(--danger); }
+.d-updates-empty { font-size: 12.5px; color: var(--text-faint); padding: 4px 2px; }
+
+/* ---- delivery ---- */
+.d-actions { display: flex; gap: 10px; margin-top: 18px; align-items: stretch; }
+.d-actions .generate { margin-top: 0; flex: 1; }
+.d-actions .btn-glass { display: inline-flex; align-items: center; gap: 8px; }
+
+.d-schedule-note { margin-top: 12px; font-size: 12.5px; color: var(--text-soft); }
+.d-schedule-note strong { color: var(--text); }
+
+.d-preview-wrap { margin-top: 4px; }
+#d-preview-frame {
+  width: 100%;
+  height: 460px;
+  border: 1px solid var(--glass-brd);
+  border-radius: var(--radius-sm);
+  background: #0c0d1c;
+}
+
+/* email pill states reuse .pill / .pill.good / .pill.need from styles.css */
+
+/* ---- include row ---- */
+.d-include-row {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 14px;
+  margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--glass-brd);
+}
+.d-check { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-soft); cursor: pointer; }
+.d-check input { accent-color: var(--accent); }
+
+/* ---- schedule ---- */
+#d-schedule { min-height: 200px; white-space: pre; tab-size: 2; }
+.d-parsed { margin-top: 14px; display: flex; flex-direction: column; gap: 6px; }
+.d-blk { padding: 8px 10px; border-radius: 12px; background: rgba(0,0,0,0.18); border: 1px solid var(--glass-brd); }
+.d-blk-time { font-size: 12px; font-weight: 700; color: var(--accent); margin-bottom: 4px; }
+.d-blk-task { font-size: 13.5px; color: var(--text); margin: 2px 0; }
+.d-blk-task.imp { color: #ffd479; font-weight: 600; }
+.d-blk-sub { font-size: 12.5px; color: var(--text-soft); margin-left: 16px; }
+
+/* ---- trackers ---- */
+.d-tracker-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+.d-tracker-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 10px 12px; border-radius: var(--radius-sm);
+  background: rgba(0,0,0,0.20); border: 1px solid var(--glass-brd);
+}
+.d-tracker-meta { font-size: 13.5px; color: var(--text); }
+.d-tracker-sub { font-size: 11.5px; color: var(--text-faint); margin-top: 2px; }
+.d-tracker-controls { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; }
+.d-tag { font-size: 10.5px; text-transform: uppercase; letter-spacing: .5px; padding: 2px 7px; border-radius: 999px; background: rgba(124,155,255,.18); color: var(--accent); }
+.d-tracker-add { border-top: 1px solid var(--glass-brd); padding-top: 14px; }
+.d-tracker-fields { display: flex; flex-direction: column; gap: 8px; margin: 4px 0 0; }
+.d-tracker-results {
+  margin-top: 12px; padding: 10px 12px; border-radius: var(--radius-sm);
+  background: rgba(0,0,0,0.25); border: 1px solid var(--glass-brd);
+  font-size: 12.5px; color: var(--text-soft); line-height: 1.5;
+}
+.d-tracker-results div { margin: 2px 0; }
+
+/* ---- reminders ---- */
+.d-reminder-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+.d-reminder-add { border-top: 1px solid var(--glass-brd); padding-top: 14px; }
+.d-tag.tag-high { background: rgba(255,143,156,.18); color: var(--danger); }
+.d-tag.tag-medium { background: rgba(255,212,121,.18); color: var(--warn); }
+.d-tag.tag-low { background: rgba(124,155,255,.18); color: var(--accent); }
+.d-overdue { color: var(--danger) !important; font-weight: 600; }
+.d-done { opacity: 0.5; }
+.d-done .d-tracker-meta { text-decoration: line-through; }
+
+/* ---- korean ---- */
+.d-korean-out { margin-top: 14px; display: flex; flex-direction: column; gap: 10px; }
+.d-k-card { padding: 12px 14px; border-radius: var(--radius-sm); background: rgba(0,0,0,0.20); border: 1px solid var(--glass-brd); }
+.d-k-ko { font-size: 17px; color: var(--text); font-weight: 600; }
+.d-k-rom { font-size: 12px; color: var(--accent); margin-left: 6px; }
+.d-k-en { font-size: 13.5px; color: var(--text-soft); margin-top: 2px; }
+.d-k-ex { font-size: 12.5px; color: var(--text-faint); margin-top: 5px; font-style: italic; }
+.d-k-label { font-size: 11px; text-transform: uppercase; letter-spacing: .6px; color: var(--accent); margin: 6px 0; font-weight: 700; }
+
+/* korean progress */
+.d-korean-progress { margin: 4px 0 14px; display: flex; flex-direction: column; gap: 4px; }
+.d-prog-row { display: flex; justify-content: space-between; font-size: 12px; color: var(--text-soft); }
+.d-prog-bar { height: 6px; border-radius: 999px; background: rgba(255,255,255,0.12); overflow: hidden; margin-bottom: 6px; }
+.d-prog-bar span { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--accent), var(--accent-2)); }
+.d-prog-meta { font-size: 11.5px; color: var(--text-faint); margin-top: 2px; }
+
+/* ---- weekly tasks ---- */
+.d-wt-list { display: flex; flex-direction: column; gap: 8px; margin: 14px 0; }
+.d-wt-item {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 10px 12px; border-radius: var(--radius-sm);
+  background: rgba(0,0,0,0.20); border: 1px solid var(--glass-brd);
+  border-left: 3px solid var(--text-faint);
+}
+.d-wt-item.p-high { border-left-color: var(--danger); }
+.d-wt-item.p-medium { border-left-color: var(--accent); }
+.d-wt-item.p-low { border-left-color: var(--text-faint); }
+.d-wt-item.done { opacity: 0.55; }
+.d-wt-check { margin-top: 2px; width: 18px; height: 18px; accent-color: var(--ok); cursor: pointer; flex: 0 0 auto; }
+.d-wt-body { flex: 1; min-width: 0; }
+.d-wt-text { font-size: 14px; color: var(--text); line-height: 1.4; }
+.d-wt-item.done .d-wt-text { text-decoration: line-through; }
+.d-wt-text[contenteditable="true"] { outline: none; border-bottom: 1px dashed var(--accent); }
+.d-wt-meta { margin-top: 3px; }
+.d-wt-prio-tag {
+  font-size: 10px; text-transform: uppercase; letter-spacing: .5px;
+  padding: 2px 7px; border-radius: 999px; cursor: pointer; border: none;
+  background: rgba(124,155,255,.18); color: var(--accent);
+}
+.d-wt-empty { font-size: 12.5px; color: var(--text-faint); padding: 4px 2px; }
+.d-wt-addrow { margin-top: 4px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.d-wt-addrow .d-update-input { flex: 1 1 180px; }
+.d-wt-prio { max-width: 120px; flex: 0 0 auto; }
+.d-wt-due-in, .d-wt-est-in { flex: 0 0 auto; padding: 9px 10px; font-size: 13px; }
+.d-wt-est-in { max-width: 90px; }
+/* per-task meta editors */
+.d-wt-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.d-wt-prio-tag.p-high { background: rgba(255,143,156,.20); color: var(--danger); }
+.d-wt-prio-tag.p-low { background: rgba(255,255,255,.10); color: var(--text-faint); }
+.d-wt-due-edit, .d-wt-est-edit {
+  background: rgba(0,0,0,0.18); border: 1px solid var(--glass-brd); color: var(--text);
+  border-radius: 8px; padding: 3px 7px; font-size: 11.5px;
+}
+.d-wt-est-edit { width: 70px; }
+.d-wt-sub-due {
+  background: rgba(0,0,0,0.18); border: 1px solid var(--glass-brd); color: var(--text-soft);
+  border-radius: 6px; padding: 2px 5px; font-size: 10.5px; flex: 0 0 auto;
+}
+.d-wt-addtoggle { display: inline-block; margin: 4px 0 2px; }
+/* nested subtask wrapper (indents cumulatively via .d-wt-subs) */
+.d-wt-subwrap { }
+
+/* clear / reset */
+.d-reset-grid { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 16px; }
+.d-reset-grid .btn-glass { font-size: 12.5px; padding: 8px 14px; }
+.d-danger {
+  background: linear-gradient(135deg, var(--danger), #ff6b7e) !important;
+  color: #1a0a0e !important;
+}
+.d-danger:hover { filter: brightness(1.05); }
+.d-wt-x { cursor: pointer; font-size: 18px; line-height: 1; color: var(--text-soft); background: none; border: none; padding: 0 2px; flex: 0 0 auto; }
+.d-wt-x:hover { color: var(--danger); }
+/* subtasks */
+.d-wt-subs { margin: 6px 0 0 6px; padding-left: 10px; border-left: 1px dashed var(--glass-brd); display: flex; flex-direction: column; gap: 5px; }
+.d-wt-sub { display: flex; align-items: center; gap: 8px; }
+.d-wt-sub.done { opacity: 0.55; }
+.d-wt-sub-check { width: 15px; height: 15px; accent-color: var(--ok); cursor: pointer; flex: 0 0 auto; }
+.d-wt-sub-text { font-size: 13px; color: var(--text-soft); flex: 1; }
+.d-wt-sub.done .d-wt-sub-text { text-decoration: line-through; }
+.d-wt-sub-text[contenteditable="true"] { outline: none; color: var(--text); border-bottom: 1px dashed var(--accent); }
+.d-wt-sub-x { cursor: pointer; font-size: 14px; line-height: 1; color: var(--text-faint); background: none; border: none; padding: 0 2px; }
+.d-wt-sub-x:hover { color: var(--danger); }
+.d-wt-sub-input { font-size: 12.5px; padding: 6px 9px; background: rgba(0,0,0,0.15); }

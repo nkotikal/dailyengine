@@ -332,4 +332,25 @@ textarea#jd { min-height: 190px; }
 .gaps-extra label { display: block; margin-bottom: 6px; }
 textarea#gaps-notes { min-height: 70px; }
 
+/* ----- saved profile & history ----- */
+#saved-profile-panel { margin-top: 22px; }
+.sp-editor { margin-top: 4px; }
+#sp-json { width: 100%; min-height: 280px; max-height: 520px; white-space: pre; tab-size: 2; }
+.sp-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.sp-actions .generate { margin-top: 0; }
+.sp-note { margin-top: 8px; color: var(--text-faint); }
+.sp-versions { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+.sp-version-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 10px 12px; border-radius: var(--radius-sm);
+  background: rgba(0,0,0,0.20); border: 1px solid var(--glass-brd);
+}
+.sp-vi-meta { font-size: 13.5px; color: var(--text); }
+.sp-vi-sub { font-size: 11.5px; color: var(--text-faint); margin-top: 2px; }
+.sp-vi-controls { display: flex; gap: 8px; flex: 0 0 auto; }
+.sp-versions-empty { font-size: 12.5px; color: var(--text-faint); padding: 4px 2px; }
+.sp-version-view { margin-top: 14px; }
+#sp-vv-json { max-height: 320px; }
+.sp-vv-title { font-size: 14px !important; }
+
 .foot { margin-top: 26px; text-align: center; color: var(--text-faint); font-size: 12.5px; }

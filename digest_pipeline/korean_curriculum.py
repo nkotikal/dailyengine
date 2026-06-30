@@ -1,0 +1,228 @@
+"""Structured TOPIK II (intermediate) curriculum data + selection helpers.
+
+This is the backbone that makes the Korean track *structured* rather than ad-hoc:
+  - GRAMMAR_SYLLABUS: an ordered list of TOPIK II grammar points (level 3 then 4).
+    The learner progresses through these in sequence; coverage is tracked.
+  - VOCAB_SEED: an ordered, high-frequency intermediate vocabulary deck. Daily
+    words are drawn in order; when the deck is exhausted the LLM supplies fresh,
+    level-appropriate words (still de-duplicated).
+
+The LLM is still used to *teach* the selected items (examples, nuance) and to
+build review prompts -- but WHAT is taught each day is decided here.
+"""
+
+# --- Ordered TOPIK II grammar syllabus (level 3, then level 4) -------------
+# Each: {"point": <Hangul form>, "english": <usage gloss>, "level": "TOPIK 3|4"}
+GRAMMAR_SYLLABUS = [
+    # ---- TOPIK 3 ----
+    {"point": "-(으)ㄴ/는 편이다", "english": "tends to be / is on the ... side", "level": "TOPIK 3"},
+    {"point": "-기 때문에", "english": "because (of) — formal cause", "level": "TOPIK 3"},
+    {"point": "-(으)니까", "english": "because / since (reason, discovery)", "level": "TOPIK 3"},
+    {"point": "-(으)ㄹ까 하다", "english": "thinking of / considering doing", "level": "TOPIK 3"},
+    {"point": "-기로 하다", "english": "decide to do", "level": "TOPIK 3"},
+    {"point": "-는 동안(에)", "english": "while / during", "level": "TOPIK 3"},
+    {"point": "-(으)ㄴ 지", "english": "(time) since doing something", "level": "TOPIK 3"},
+    {"point": "-는 중이다", "english": "be in the middle of doing", "level": "TOPIK 3"},
+    {"point": "-(으)면서", "english": "while doing (simultaneously)", "level": "TOPIK 3"},
+    {"point": "-자마자", "english": "as soon as", "level": "TOPIK 3"},
+    {"point": "-(으)ㄹ 때", "english": "when / at the time of", "level": "TOPIK 3"},
+    {"point": "-는 게 좋겠다", "english": "had better / it'd be good to", "level": "TOPIK 3"},
+    {"point": "-아/어 보이다", "english": "looks / seems (appearance)", "level": "TOPIK 3"},
+    {"point": "-아/어지다", "english": "become (change of state)", "level": "TOPIK 3"},
+    {"point": "-게 되다", "english": "come to / end up (turn of events)", "level": "TOPIK 3"},
+    {"point": "-아/어도", "english": "even if / even though", "level": "TOPIK 3"},
+    {"point": "-(으)ㄹ 뿐만 아니라", "english": "not only ... but also", "level": "TOPIK 3"},
+    {"point": "-(으)ㄴ/는데도", "english": "even though / despite", "level": "TOPIK 3"},
+    {"point": "-(으)ㄹ 수밖에 없다", "english": "have no choice but to", "level": "TOPIK 3"},
+    {"point": "-(으)ㄹ 정도로", "english": "to the extent that", "level": "TOPIK 3"},
+    {"point": "-잖아요", "english": "you know / as you know (reminding)", "level": "TOPIK 3"},
+    {"point": "-거든요", "english": "(it's) because / you see (explanation)", "level": "TOPIK 3"},
+    {"point": "-(으)ㄴ/는데요", "english": "soft ending: background / mild contrast", "level": "TOPIK 3"},
+    {"point": "-는 대로", "english": "as soon as / in accordance with", "level": "TOPIK 3"},
+    {"point": "-(으)ㄹ 테니까", "english": "I will, so / it probably will, so", "level": "TOPIK 3"},
+    {"point": "-(으)ㄹ게요", "english": "I'll (promise/intention)", "level": "TOPIK 3"},
+    {"point": "-(으)ㄹ래요", "english": "want to / shall (casual intention)", "level": "TOPIK 3"},
+    {"point": "-(으)려고 하다", "english": "intend to / be about to", "level": "TOPIK 3"},
+    {"point": "-기 위해(서)", "english": "in order to / for the sake of", "level": "TOPIK 3"},
+    {"point": "-도록 하다", "english": "make sure to / so that", "level": "TOPIK 3"},
+    {"point": "-게 하다", "english": "make/let someone do (causative)", "level": "TOPIK 3"},
+    {"point": "-아/어야 하다", "english": "have to / must", "level": "TOPIK 3"},
+    {"point": "-(으)ㄴ 적이 있다/없다", "english": "have / have never (experience)", "level": "TOPIK 3"},
+    {"point": "-(으)ㄹ 줄 알다/모르다", "english": "know/don't know how to", "level": "TOPIK 3"},
+    {"point": "-(으)ㄴ/는 것 같다", "english": "seems / I think (guess)", "level": "TOPIK 3"},
+    {"point": "-(으)ㄹ 것 같다", "english": "looks like it will (future guess)", "level": "TOPIK 3"},
+    {"point": "-나 보다 / -(으)ㄴ가 보다", "english": "seems that (inference)", "level": "TOPIK 3"},
+    {"point": "-기 전에 / -(으)ㄴ 후에", "english": "before / after doing", "level": "TOPIK 3"},
+    {"point": "-(으)ㄹ 만하다", "english": "worth doing / be worthwhile", "level": "TOPIK 3"},
+    {"point": "-아/어 두다", "english": "do in advance / keep done", "level": "TOPIK 3"},
+    # ---- TOPIK 4 ----
+    {"point": "-느라고", "english": "because of doing (negative result)", "level": "TOPIK 4"},
+    {"point": "-는 바람에", "english": "because of (unexpected negative cause)", "level": "TOPIK 4"},
+    {"point": "-(으)ㄴ/는 탓에", "english": "owing to (blame, negative)", "level": "TOPIK 4"},
+    {"point": "-(으)ㄴ/는 덕분에", "english": "thanks to (positive)", "level": "TOPIK 4"},
+    {"point": "-더니", "english": "and then / as a result (observed)", "level": "TOPIK 4"},
+    {"point": "-았/었더니", "english": "when I did, (then I found)", "level": "TOPIK 4"},
+    {"point": "-던", "english": "retrospective modifier (used to)", "level": "TOPIK 4"},
+    {"point": "-곤 하다", "english": "used to / do repeatedly", "level": "TOPIK 4"},
+    {"point": "-기 마련이다", "english": "is bound to / naturally happens", "level": "TOPIK 4"},
+    {"point": "-는 셈이다", "english": "it's as good as / amounts to", "level": "TOPIK 4"},
+    {"point": "-(으)ㄴ/는 척하다", "english": "pretend to", "level": "TOPIK 4"},
+    {"point": "-(으)ㄹ 뻔하다", "english": "almost (nearly happened)", "level": "TOPIK 4"},
+    {"point": "-(으)ㄹ 지경이다", "english": "to the point of / on the verge of", "level": "TOPIK 4"},
+    {"point": "-(으)ㄴ/는 김에", "english": "while you're at it / on the occasion of", "level": "TOPIK 4"},
+    {"point": "-(으)ㄹ 겸", "english": "and also / for the dual purpose of", "level": "TOPIK 4"},
+    {"point": "-는 한", "english": "as long as (condition)", "level": "TOPIK 4"},
+    {"point": "-(으)ㄹ수록", "english": "the more ... the more", "level": "TOPIK 4"},
+    {"point": "-더라도", "english": "even if (strong concession)", "level": "TOPIK 4"},
+    {"point": "-(으)ㄴ들", "english": "even if / even though (literary)", "level": "TOPIK 4"},
+    {"point": "-(으)ㄹ 바에(야)", "english": "rather than / if it comes to", "level": "TOPIK 4"},
+    {"point": "-(으)ㄴ/는 반면(에)", "english": "on the other hand / whereas", "level": "TOPIK 4"},
+    {"point": "-(으)ㄴ/는 데 반해", "english": "in contrast to", "level": "TOPIK 4"},
+    {"point": "-기는커녕", "english": "far from / let alone", "level": "TOPIK 4"},
+    {"point": "-(으)ㄹ 따름이다", "english": "can only / nothing but", "level": "TOPIK 4"},
+    {"point": "-(으)ㄹ 리가 없다", "english": "there's no way that", "level": "TOPIK 4"},
+    {"point": "-(으)ㄴ/는 모양이다", "english": "it appears that (inference)", "level": "TOPIK 4"},
+    {"point": "-(으)ㄴ/는 듯하다", "english": "seems as if", "level": "TOPIK 4"},
+    {"point": "-다시피", "english": "as you (know/see)", "level": "TOPIK 4"},
+    {"point": "-았/었으면 하다", "english": "I wish / hope that", "level": "TOPIK 4"},
+    {"point": "-도록", "english": "so that / until / to the point", "level": "TOPIK 4"},
+    {"point": "-(으)ㅁ에 따라", "english": "according to / as ... changes", "level": "TOPIK 4"},
+    {"point": "-(으)로 인해(서)", "english": "due to / caused by (formal)", "level": "TOPIK 4"},
+    {"point": "-(으)ㄴ/는 이상", "english": "now that / since (given that)", "level": "TOPIK 4"},
+    {"point": "-(으)ㄹ 게 아니라", "english": "rather than doing, (instead)", "level": "TOPIK 4"},
+    {"point": "-고 보니", "english": "after doing, I realized", "level": "TOPIK 4"},
+    {"point": "-다 보니", "english": "as I kept doing, (gradually)", "level": "TOPIK 4"},
+    {"point": "-다 보면", "english": "if you keep doing, (eventually)", "level": "TOPIK 4"},
+    {"point": "-(으)ㄴ 채(로)", "english": "while in a (fixed) state", "level": "TOPIK 4"},
+    {"point": "-(으)며", "english": "and / while (formal listing)", "level": "TOPIK 4"},
+    {"point": "-(으)ㄹ 정도이다", "english": "to such a degree that", "level": "TOPIK 4"},
+]
+
+# --- Ordered intermediate vocabulary deck (high-frequency TOPIK II) ---------
+# Each: {"korean", "english", "pos"}. Romanization + examples are added by the LLM.
+VOCAB_SEED = [
+    {"korean": "환경", "english": "environment", "pos": "noun"},
+    {"korean": "경험", "english": "experience", "pos": "noun"},
+    {"korean": "기회", "english": "opportunity, chance", "pos": "noun"},
+    {"korean": "관심", "english": "interest, attention", "pos": "noun"},
+    {"korean": "방법", "english": "method, way", "pos": "noun"},
+    {"korean": "과정", "english": "process, course", "pos": "noun"},
+    {"korean": "결과", "english": "result", "pos": "noun"},
+    {"korean": "이유", "english": "reason", "pos": "noun"},
+    {"korean": "목적", "english": "purpose, goal", "pos": "noun"},
+    {"korean": "능력", "english": "ability", "pos": "noun"},
+    {"korean": "태도", "english": "attitude", "pos": "noun"},
+    {"korean": "성격", "english": "personality", "pos": "noun"},
+    {"korean": "습관", "english": "habit", "pos": "noun"},
+    {"korean": "변화", "english": "change", "pos": "noun"},
+    {"korean": "발전", "english": "development, progress", "pos": "noun"},
+    {"korean": "문화", "english": "culture", "pos": "noun"},
+    {"korean": "사회", "english": "society", "pos": "noun"},
+    {"korean": "경제", "english": "economy", "pos": "noun"},
+    {"korean": "정치", "english": "politics", "pos": "noun"},
+    {"korean": "역사", "english": "history", "pos": "noun"},
+    {"korean": "정보", "english": "information", "pos": "noun"},
+    {"korean": "기술", "english": "technology, skill", "pos": "noun"},
+    {"korean": "효과", "english": "effect", "pos": "noun"},
+    {"korean": "영향", "english": "influence", "pos": "noun"},
+    {"korean": "차이", "english": "difference", "pos": "noun"},
+    {"korean": "관계", "english": "relationship", "pos": "noun"},
+    {"korean": "상황", "english": "situation", "pos": "noun"},
+    {"korean": "조건", "english": "condition", "pos": "noun"},
+    {"korean": "기준", "english": "standard, criterion", "pos": "noun"},
+    {"korean": "역할", "english": "role", "pos": "noun"},
+    {"korean": "분야", "english": "field, area", "pos": "noun"},
+    {"korean": "수준", "english": "level, standard", "pos": "noun"},
+    {"korean": "현상", "english": "phenomenon", "pos": "noun"},
+    {"korean": "원인", "english": "cause", "pos": "noun"},
+    {"korean": "해결", "english": "solution, resolution", "pos": "noun"},
+    {"korean": "참여", "english": "participation", "pos": "noun"},
+    {"korean": "노력", "english": "effort", "pos": "noun"},
+    {"korean": "선택", "english": "choice", "pos": "noun"},
+    {"korean": "준비", "english": "preparation", "pos": "noun"},
+    {"korean": "계획", "english": "plan", "pos": "noun"},
+    {"korean": "이용하다", "english": "to use, utilize", "pos": "verb"},
+    {"korean": "포함하다", "english": "to include", "pos": "verb"},
+    {"korean": "제공하다", "english": "to provide", "pos": "verb"},
+    {"korean": "표현하다", "english": "to express", "pos": "verb"},
+    {"korean": "발생하다", "english": "to occur, happen", "pos": "verb"},
+    {"korean": "증가하다", "english": "to increase", "pos": "verb"},
+    {"korean": "감소하다", "english": "to decrease", "pos": "verb"},
+    {"korean": "변하다", "english": "to change", "pos": "verb"},
+    {"korean": "발전하다", "english": "to develop", "pos": "verb"},
+    {"korean": "해결하다", "english": "to solve", "pos": "verb"},
+    {"korean": "참여하다", "english": "to participate", "pos": "verb"},
+    {"korean": "선택하다", "english": "to choose", "pos": "verb"},
+    {"korean": "차지하다", "english": "to occupy, take up", "pos": "verb"},
+    {"korean": "유지하다", "english": "to maintain", "pos": "verb"},
+    {"korean": "마련하다", "english": "to prepare, arrange", "pos": "verb"},
+    {"korean": "이루다", "english": "to achieve, form", "pos": "verb"},
+    {"korean": "맡다", "english": "to take charge of", "pos": "verb"},
+    {"korean": "느끼다", "english": "to feel", "pos": "verb"},
+    {"korean": "깨닫다", "english": "to realize", "pos": "verb"},
+    {"korean": "기억하다", "english": "to remember", "pos": "verb"},
+    {"korean": "후회하다", "english": "to regret", "pos": "verb"},
+    {"korean": "고민하다", "english": "to agonize, worry over", "pos": "verb"},
+    {"korean": "참다", "english": "to endure, hold back", "pos": "verb"},
+    {"korean": "견디다", "english": "to bear, withstand", "pos": "verb"},
+    {"korean": "벌다", "english": "to earn (money)", "pos": "verb"},
+    {"korean": "쌓다", "english": "to build up, accumulate", "pos": "verb"},
+    {"korean": "다루다", "english": "to handle, deal with", "pos": "verb"},
+    {"korean": "나누다", "english": "to divide, share", "pos": "verb"},
+    {"korean": "줄이다", "english": "to reduce", "pos": "verb"},
+    {"korean": "늘리다", "english": "to increase (something)", "pos": "verb"},
+    {"korean": "복잡하다", "english": "to be complicated", "pos": "adjective"},
+    {"korean": "단순하다", "english": "to be simple", "pos": "adjective"},
+    {"korean": "분명하다", "english": "to be clear, obvious", "pos": "adjective"},
+    {"korean": "확실하다", "english": "to be certain", "pos": "adjective"},
+    {"korean": "적당하다", "english": "to be appropriate, moderate", "pos": "adjective"},
+    {"korean": "심각하다", "english": "to be serious, severe", "pos": "adjective"},
+    {"korean": "다양하다", "english": "to be diverse", "pos": "adjective"},
+    {"korean": "풍부하다", "english": "to be abundant", "pos": "adjective"},
+    {"korean": "익숙하다", "english": "to be familiar, used to", "pos": "adjective"},
+    {"korean": "낯설다", "english": "to be unfamiliar", "pos": "adjective"},
+    {"korean": "소중하다", "english": "to be precious", "pos": "adjective"},
+    {"korean": "당연하다", "english": "to be natural, obvious", "pos": "adjective"},
+    {"korean": "충분하다", "english": "to be sufficient", "pos": "adjective"},
+    {"korean": "부족하다", "english": "to be insufficient", "pos": "adjective"},
+    {"korean": "꾸준하다", "english": "to be steady, consistent", "pos": "adjective"},
+    {"korean": "활발하다", "english": "to be lively, active", "pos": "adjective"},
+    {"korean": "신중하다", "english": "to be careful, prudent", "pos": "adjective"},
+    {"korean": "오히려", "english": "rather, on the contrary", "pos": "adverb"},
+    {"korean": "반드시", "english": "without fail, certainly", "pos": "adverb"},
+    {"korean": "결국", "english": "in the end, after all", "pos": "adverb"},
+    {"korean": "마침내", "english": "finally, at last", "pos": "adverb"},
+    {"korean": "드디어", "english": "finally (anticipated)", "pos": "adverb"},
+    {"korean": "여전히", "english": "still, as before", "pos": "adverb"},
+    {"korean": "점점", "english": "gradually, more and more", "pos": "adverb"},
+    {"korean": "특히", "english": "especially", "pos": "adverb"},
+    {"korean": "비록", "english": "although (paired with -지만)", "pos": "adverb"},
+    {"korean": "아무리", "english": "no matter how", "pos": "adverb"},
+    {"korean": "과연", "english": "indeed, as expected", "pos": "adverb"},
+    {"korean": "물론", "english": "of course", "pos": "adverb"},
+    {"korean": "대체로", "english": "generally, on the whole", "pos": "adverb"},
+    {"korean": "거의", "english": "almost, nearly", "pos": "adverb"},
+]
+
+LEVEL_START_INDEX = {
+    "beginner": 0,
+    "intermediate": 0,            # full TOPIK II from the start
+    "intermediate-high": 40,      # skip ahead into TOPIK 4 grammar
+    "advanced": 40,
+}
+
+
+def grammar_total() -> int:
+    return len(GRAMMAR_SYLLABUS)
+
+
+def vocab_total() -> int:
+    return len(VOCAB_SEED)
+
+
+def grammar_slice(start: int, n: int):
+    return GRAMMAR_SYLLABUS[start:start + n]
+
+
+def vocab_slice(start: int, n: int):
+    return VOCAB_SEED[start:start + n]
