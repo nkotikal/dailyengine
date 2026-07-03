@@ -23,9 +23,50 @@
     });
     $("app-title").textContent = TITLES[which];
     $("app-tagline").textContent = TAGLINES[which];
+    // Re-apply Korean UI after dynamic title/tagline swap.
+    if (document.documentElement.getAttribute("lang") === "ko"
+        && typeof window.applyUILang === "function") window.applyUILang("ko");
     try { localStorage.setItem("activeTab", which); } catch (e) { /* ignore */ }
     if (which === "digest" && !loadedOnce) { loadedOnce = true; loadStatus(); }
     if (which === "memory" && !memoryLoaded) { memoryLoaded = true; loadMemory(); }
+  }
+
+  function switchSub(which) {
+    const tabs = document.querySelectorAll("#digest-subtabs .subtab");
+    let valid = false;
+    tabs.forEach((b) => { if (b.dataset.sub === which) valid = true; });
+    if (!valid) which = "digest";
+    tabs.forEach((b) => b.classList.toggle("active", b.dataset.sub === which));
+    document.querySelectorAll("#view-digest .glass.panel[data-group]").forEach((p) => {
+      p.hidden = p.dataset.group !== which;
+    });
+    try { localStorage.setItem("digestSub", which); } catch (e) { /* ignore */ }
+  }
+
+  function applyLanguageUI() {
+    const lang = ($("d-language") && $("d-language").value) || "korean";
+    if ($("d-korean-opts")) $("d-korean-opts").hidden = lang !== "korean";
+    if ($("d-english-opts")) $("d-english-opts").hidden = lang !== "english";
+    // Clear a stale lesson preview when switching languages.
+    if ($("d-korean-out")) { $("d-korean-out").hidden = true; $("d-korean-out").innerHTML = ""; }
+  }
+
+  // Apply a per-user color theme (kept in sync with the header theme picker).
+  function applyUserTheme(theme) {
+    const t = theme || "aurora";
+    if (t && t !== "aurora") document.documentElement.setAttribute("data-theme", t);
+    else document.documentElement.removeAttribute("data-theme");
+    const sel = document.getElementById("theme-select");
+    if (sel) sel.value = t;
+    try { localStorage.setItem("rf-theme", t); } catch (e) { /* ignore */ }
+  }
+
+  function applyUserPattern(pattern) {
+    const p = pattern || "moroccan";
+    document.documentElement.setAttribute("data-pattern", p);
+    const sel = document.getElementById("pattern-select");
+    if (sel) sel.value = p;
+    try { localStorage.setItem("rf-pattern", p); } catch (e) { /* ignore */ }
   }
 
   function chip(label, value, state) {
@@ -66,10 +107,13 @@
       include_trackers: $("d-inc-trackers").checked,
       korean_enabled: $("d-korean").checked,
       korean_level: $("d-korean-level").value || "intermediate",
+      language: ($("d-language") && $("d-language").value) || "korean",
+      english_level: ($("d-english-level") && $("d-english-level").value) || "advanced",
       daily_capacity_hours: parseFloat($("d-capacity").value) || 6,
       news_enabled: $("d-news-enabled").checked,
       interests: $("d-interests").value.split(",").map((s) => s.trim()).filter(Boolean),
       news_sources: newsSources,
+      openai_model: $("d-openai-model").value || "gpt-5.4-mini",
     };
   }
 
@@ -89,9 +133,19 @@
     $("d-inc-trackers").checked = cfg.include_trackers !== false;
     $("d-korean").checked = !!cfg.korean_enabled;
     $("d-korean-level").value = cfg.korean_level || "intermediate";
+    if ($("d-language")) $("d-language").value = cfg.language || "korean";
+    if ($("d-english-level")) $("d-english-level").value = cfg.english_level || "advanced";
+    applyLanguageUI();
+    if (cfg.theme != null) applyUserTheme(cfg.theme);
+    if (cfg.pattern != null) applyUserPattern(cfg.pattern);
+    if (cfg.ui_lang != null && typeof window.applyUILang === "function") {
+      try { localStorage.setItem("rf-lang", cfg.ui_lang); } catch (e) { /* ignore */ }
+      window.applyUILang(cfg.ui_lang);
+    }
     $("d-capacity").value = cfg.daily_capacity_hours != null ? cfg.daily_capacity_hours : 6;
     $("d-news-enabled").checked = cfg.news_enabled !== false;
     $("d-interests").value = (cfg.interests || []).join(", ");
+    if (cfg.openai_model) $("d-openai-model").value = cfg.openai_model;
   }
 
   function renderChips(s) {
@@ -103,6 +157,14 @@
     ];
     if (s.state && s.state.last_sent_date) {
       chips.push(chip("Last sent", s.state.last_sent_date, "good"));
+    }
+    if (s.replies_deferred_at) {
+      chips.push(chip("Replies", "pending (AI was down)", "bad"));
+    }
+    const today = new Date().toISOString().slice(0, 10);
+    if (s.schedule && s.schedule.for_date && s.schedule.for_date !== today
+        && s.schedule.counts && s.schedule.counts.tasks) {
+      chips.push(chip("Schedule", "for " + s.schedule.for_date, "need"));
     }
     $("digest-chips").innerHTML = chips.join("");
 
@@ -154,6 +216,44 @@
     });
   }
 
+  function renderReflection(refl) {
+    const wrap = $("d-reflection");
+    const pill = $("d-reflection-pill");
+    if (!wrap) return;
+    if (!refl || !(refl.accomplished || refl.blockers || refl.whats_next
+                   || refl.mood || refl.progress_quality)) {
+      wrap.innerHTML = `<div class="d-updates-empty">No reflection captured yet.</div>`;
+      if (pill) pill.hidden = true;
+      return;
+    }
+    if (pill) {
+      pill.hidden = false;
+      pill.textContent = refl.date || "";
+    }
+    const rows = [];
+    const list = (label, arr) => {
+      if (arr && arr.length) {
+        rows.push(`<div class="d-refl-row"><span class="d-refl-k">${label}</span>`
+          + `<span class="d-refl-v">${arr.map(escapeHtml).join(" · ")}</span></div>`);
+      }
+    };
+    list("Did", refl.accomplished);
+    if (refl.blockers && refl.blockers.length) {
+      const b = refl.blockers.map((x) => `${escapeHtml(x.type || "")}: ${escapeHtml(x.text || "")}`);
+      rows.push(`<div class="d-refl-row"><span class="d-refl-k">Blocked</span>`
+        + `<span class="d-refl-v">${b.join(" · ")}</span></div>`);
+    }
+    list("Next", refl.whats_next);
+    const meta = [];
+    if (refl.mood) meta.push("mood: " + refl.mood);
+    if (refl.progress_quality) meta.push("progress: " + refl.progress_quality);
+    if (meta.length) {
+      rows.push(`<div class="d-refl-row"><span class="d-refl-k">Read</span>`
+        + `<span class="d-refl-v">${escapeHtml(meta.join(" · "))}</span></div>`);
+    }
+    wrap.innerHTML = rows.join("") || `<div class="d-updates-empty">No reflection captured yet.</div>`;
+  }
+
   async function loadStatus() {
     try {
       const r = await fetch("/api/digest/status");
@@ -162,6 +262,7 @@
       applyConfig(s.config);
       renderChips(s);
       renderScheduleNote(s);
+      renderReflection(s.reflection);
       renderUpdates(s.pending_updates || []);
       trackerTypes = s.tracker_types || {};
       if (s.schedule && typeof s.schedule.raw === "string" && !$("d-schedule").value) {
@@ -185,7 +286,7 @@
   }
 
   // ---- weekly tasks ----
-  const WT_PRIO = ["high", "medium", "low"];
+  const WT_PRIO = ["critical", "high", "medium", "low"];
   function wtError(msg) { const el = $("d-wt-error"); el.textContent = msg || ""; el.hidden = !msg; }
   function fmtEst(min) {
     min = parseInt(min || 0, 10);
@@ -261,6 +362,11 @@
         { id: el.dataset.id, fields: { due: el.value } })));
     wrap.querySelectorAll(".d-wt-sub-x").forEach((b) =>
       b.addEventListener("click", () => wtPost("/api/digest/tasks/subtask/delete", { id: b.dataset.id })));
+    wrap.querySelectorAll(".d-wt-sub-addbtn").forEach((b) =>
+      b.addEventListener("click", () => {
+        const inp = b.nextElementSibling;
+        if (inp) { inp.hidden = !inp.hidden; if (!inp.hidden) inp.focus(); }
+      }));
     wrap.querySelectorAll(".d-wt-sub-input").forEach((inp) =>
       inp.addEventListener("keydown", (e) => {
         if (e.key !== "Enter") return;
@@ -282,7 +388,9 @@
         </div>
         ${renderSubtree(s.subtasks || [], s.id)}
       </div>`).join("");
-    return `<div class="d-wt-subs">${inner}<input type="text" class="field d-wt-sub-input" data-parent="${parentId}" placeholder="+ subtask" /></div>`;
+    return `<div class="d-wt-subs">${inner}`
+      + `<button type="button" class="d-wt-sub-addbtn" data-parent="${parentId}">+ subtask</button>`
+      + `<input type="text" class="field d-wt-sub-input" data-parent="${parentId}" placeholder="subtask, then Enter" hidden /></div>`;
   }
 
   async function wtPost(path, body, btn, label) {
@@ -449,12 +557,13 @@
     const wrap = $("d-parsed");
     if (!parsed || !parsed.blocks || !parsed.blocks.length) { wrap.hidden = true; return; }
     wrap.hidden = false;
+    const mark = (n) => n.critical ? "\u203c\ufe0f " : (n.important ? "\u2605 " : "");
     wrap.innerHTML = parsed.blocks.filter(b => b.tasks.length).map((b) => `
       <div class="d-blk">
         <div class="d-blk-time">${escapeHtml(b.time_str)}</div>
         ${b.tasks.map((t) => `
-          <div class="d-blk-task ${t.important ? "imp" : ""}">${t.important ? "★ " : ""}${escapeHtml(t.text)}</div>
-          ${t.subtasks.map((s) => `<div class="d-blk-sub">${s.important ? "★ " : "· "}${escapeHtml(s.text)}</div>`).join("")}
+          <div class="d-blk-task ${t.critical ? "crit" : (t.important ? "imp" : "")}">${mark(t)}${escapeHtml(t.text)}</div>
+          ${t.subtasks.map((s) => `<div class="d-blk-sub">${mark(s) || "\u00b7 "}${escapeHtml(s.text)}</div>`).join("")}
         `).join("")}
       </div>`).join("");
   }
@@ -697,17 +806,23 @@
     loadStatus();
   }
 
-  // ---- korean ----
+  // ---- language practice ----
   function renderKoreanPill(k) {
     const pill = $("d-korean-pill");
+    const lang = (k && k.language) || "korean";
     if (k && k.enabled) {
-      pill.textContent = `${k.level} · ${k.seen_vocab} learned`;
+      if (lang === "english") {
+        pill.textContent = `English · ${typeof k.progress === "string" ? k.progress : "on"}`;
+      } else {
+        pill.textContent = `${k.level} · ${k.seen_vocab} learned`;
+      }
       pill.className = "pill good";
     } else {
       pill.textContent = "off";
       pill.className = "pill ghost";
     }
-    const prog = k && k.progress;
+    // The structured progress bars only apply to the Korean syllabus.
+    const prog = (lang === "korean" && k && typeof k.progress === "object") ? k.progress : null;
     const wrap = $("d-korean-progress");
     if (prog) {
       const gpct = prog.grammar_total ? Math.round(100 * prog.grammar_done / prog.grammar_total) : 0;
@@ -749,9 +864,24 @@
         headers: { "Content-Type": "application/json" }, body: "{}" });
       const data = await r.json();
       if (!data.ok) { showError(data.error || "Could not generate lesson."); return; }
-      renderKorean(data.lesson);
+      if (data.language === "english") renderEnglish(data.lesson);
+      else renderKorean(data.lesson);
     } catch (e) { showError("Network error: " + e.message); }
     finally { setBusy(btn, false, "Preview today's lesson"); }
+  }
+
+  function renderEnglish(lesson) {
+    const out = $("d-korean-out");
+    out.hidden = false;
+    const words = (lesson && lesson.words) || [];
+    let html = `<div class="d-k-label">Vocabulary${lesson && lesson.theme ? " · " + escapeHtml(lesson.theme) : ""}</div>`;
+    html += words.map((w) => `<div class="d-k-card">
+      <div><span class="d-k-ko">${escapeHtml(w.word)}</span>${w.pos ? ` <em>(${escapeHtml(w.pos)})</em>` : ""}</div>
+      <div class="d-k-en">${escapeHtml(w.definition || "")}</div>
+      ${w.example ? `<div class="d-k-ex">${escapeHtml(w.example)}</div>` : ""}
+      ${w.synonyms ? `<div class="d-k-ex">syn: ${escapeHtml(w.synonyms)}</div>` : ""}
+    </div>`).join("");
+    out.innerHTML = html || `<div class="d-updates-empty">No words.</div>`;
   }
 
   function renderKorean(lesson) {
@@ -905,6 +1035,46 @@
     }
   }
 
+  // Resend: save the current schedule (in case you just added/edited it) and
+  // settings, then rebuild and re-email today's digest with the updated info.
+  async function resendNow() {
+    showError("");
+    if (!$("d-email-to").value.trim()) {
+      showError("Add a recipient email address first.");
+      return;
+    }
+    const btn = $("d-resend");
+    setBusy(btn, true, "Resend with updates");
+    try {
+      const raw = $("d-schedule").value;
+      if (raw && raw.trim()) {
+        const sr = await fetch("/api/digest/schedule", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ raw }),
+        });
+        const sd = await sr.json();
+        if (sd.ok && sd.parsed) renderParsed(sd.parsed);
+      }
+      await saveConfig(true);
+      const r = await fetch("/api/digest/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ config: collectConfig() }),
+      });
+      const data = await r.json();
+      if (!data.ok) { showError(data.error || "Resend failed."); return; }
+      const st = $("d-save-status");
+      st.textContent = `Resent to ${data.sent_to}`;
+      setTimeout(() => { st.textContent = ""; }, 3000);
+      if (data.warning) showError(data.warning);
+      loadStatus();
+    } catch (e) {
+      showError("Network error: " + e.message);
+    } finally {
+      setBusy(btn, false, "Resend with updates");
+    }
+  }
+
   // ============================ MEMORY ============================
   let memories = [];
   let memCategories = [];
@@ -923,22 +1093,30 @@
     $("m-filter").querySelectorAll(".m-chip").forEach((ch) =>
       ch.addEventListener("click", () => { memFilter = ch.dataset.cat; renderMemory(); }));
 
-    const shown = memories.filter((m) => memFilter === "all" || m.category === memFilter);
+    const shown = memories
+      .filter((m) => memFilter === "all" || m.category === memFilter)
+      .sort((a, b) => (b.importance || 0) - (a.importance || 0));
     const list = $("m-list");
     if (!shown.length) { list.innerHTML = `<div class="m-empty">No memories yet. Upload a resume or tell it about yourself.</div>`; return; }
-    list.innerHTML = shown.map((m) => `
+    list.innerHTML = shown.map((m) => {
+      const imp = m.importance == null ? 60 : m.importance;
+      const impColor = imp >= 66 ? "var(--ok)" : (imp >= 33 ? "var(--warn)" : "var(--text-faint)");
+      const comp = m.source === "compressed" ? ` · <span style="color:var(--accent)">compressed</span>` : "";
+      return `
       <div class="m-item">
         <div class="m-item-body">
           <div class="m-item-text" data-id="${m.id}">${escapeHtml(m.text)}</div>
           <div class="m-item-meta">
             <span class="m-cat" data-id="${m.id}" title="Click to change category">${escapeHtml(m.category)}</span>
-            <span class="m-time">${escapeHtml(m.source || "")} · ${escapeHtml((m.updated_at || "").slice(0, 10))}</span>
+            <span class="m-imp" title="Importance"><span style="color:${impColor}">●</span> ${imp}</span>
+            <span class="m-time">${escapeHtml((m.updated_at || "").slice(0, 10))}${comp}</span>
           </div>
         </div>
         <div class="m-controls">
           <button class="d-update-x" data-id="${m.id}" title="Delete">&times;</button>
         </div>
-      </div>`).join("");
+      </div>`;
+    }).join("");
     // inline edit text on blur
     list.querySelectorAll(".m-item-text").forEach((el) => {
       el.addEventListener("dblclick", () => { el.contentEditable = "true"; el.focus(); });
@@ -962,6 +1140,9 @@
   function applyMemoryPayload(data) {
     memories = data.memories || [];
     if (data.categories) memCategories = data.categories;
+    if (data.profile_base != null && document.activeElement !== $("m-profile")) {
+      $("m-profile").value = data.profile_base;
+    }
     renderMemory();
     $("memory-chips").innerHTML =
       chip("Memories", String(memories.length), "good") +
@@ -1080,15 +1261,63 @@
     });
   }
 
+  async function saveProfileBase() {
+    const data = await memPost("/api/memory/profile", { text: $("m-profile").value });
+    if (data) {
+      const st = $("m-profile-status"); st.textContent = "Saved";
+      setTimeout(() => { st.textContent = ""; }, 1800);
+    }
+  }
+  async function evolveMemory() {
+    const btn = $("m-evolve");
+    btn.disabled = true; btn.textContent = "Consolidating...";
+    const data = await memPost("/api/memory/evolve", {});
+    if (data) {
+      applyMemoryPayload(data);
+      const e = data.evolve || {};
+      const note = $("m-change-note"); note.hidden = false;
+      note.textContent = `Evolved: ${e.compressed || 0} compressed, ${e.decayed || 0} reweighted, ${e.kept || 0} kept.`;
+    }
+    btn.disabled = false; btn.textContent = "Consolidate memory now";
+  }
+
+  // Make every panel collapsible by clicking its header (state remembered).
+  function setupCollapsibles() {
+    document.querySelectorAll(".glass.panel").forEach((panel) => {
+      const head = panel.firstElementChild;
+      if (!head || !head.classList.contains("section-head")) return;
+      const h2 = head.querySelector("h2");
+      if (!h2 || h2.dataset.collapsible) return;
+      h2.dataset.collapsible = "1";
+      const chev = document.createElement("span");
+      chev.className = "collapse-chev";
+      h2.prepend(chev);
+      h2.style.cursor = "pointer";
+      const key = "collapse:" + h2.textContent.trim();
+      const apply = (c) => { panel.classList.toggle("collapsed", c); chev.textContent = c ? "\u25B8" : "\u25BE"; };
+      let collapsed = false;
+      try { collapsed = localStorage.getItem(key) === "1"; } catch (e) { /* ignore */ }
+      apply(collapsed);
+      h2.addEventListener("click", () => {
+        collapsed = !collapsed;
+        apply(collapsed);
+        try { localStorage.setItem(key, collapsed ? "1" : "0"); } catch (e) { /* ignore */ }
+      });
+    });
+  }
+
   function init() {
     $("tab-resume").addEventListener("click", () => switchTab("resume"));
     $("tab-digest").addEventListener("click", () => switchTab("digest"));
     $("tab-memory").addEventListener("click", () => switchTab("memory"));
+    setupCollapsibles();
     ["d-weekly-goals", "d-tasks", "d-longterm-goals", "d-schedule"].forEach(enableTabKey);
     $("m-ingest").addEventListener("click", ingestResume);
     $("m-resume-file").addEventListener("change", onMemResumeFile);
     $("m-apply").addEventListener("click", applyMemoryCommand);
     $("m-add-direct").addEventListener("click", addDirectMemory);
+    $("m-profile-save").addEventListener("click", saveProfileBase);
+    $("m-evolve").addEventListener("click", evolveMemory);
     $("d-save").addEventListener("click", () => saveConfig(false));
     $("d-add-update").addEventListener("click", addUpdate);
     $("d-update-input").addEventListener("keydown", (e) => {
@@ -1096,13 +1325,25 @@
     });
     $("d-preview").addEventListener("click", preview);
     $("d-send").addEventListener("click", sendNow);
+    $("d-resend").addEventListener("click", resendNow);
     // persist toggles immediately so the scheduler reflects them
     $("d-enabled").addEventListener("change", () => saveConfig(true));
     $("d-offline").addEventListener("change", () => saveConfig(true));
     ["d-inc-schedule", "d-inc-calendar", "d-inc-trackers", "d-korean"].forEach((id) =>
       $(id).addEventListener("change", () => { saveConfig(true).then(loadStatus); }));
     $("d-korean-level").addEventListener("change", () => saveConfig(true));
+    $("d-english-level").addEventListener("change", () => saveConfig(true));
+    $("d-language").addEventListener("change", () => {
+      applyLanguageUI();
+      saveConfig(true).then(loadStatus);
+    });
     $("d-capacity").addEventListener("change", () => saveConfig(true));
+    // in-page sub-tab navigation
+    document.querySelectorAll("#digest-subtabs .subtab").forEach((b) =>
+      b.addEventListener("click", () => switchSub(b.dataset.sub)));
+    let savedSub = "digest";
+    try { savedSub = localStorage.getItem("digestSub") || "digest"; } catch (e) { /* ignore */ }
+    switchSub(savedSub);
     // schedule
     $("d-parse").addEventListener("click", parseSchedule);
     $("d-push-cal").addEventListener("click", pushCalendar);
@@ -1140,10 +1381,10 @@
       if (e.key === "Enter") { e.preventDefault(); addTask(); }
     });
 
-    // Restore the tab the user was last on across reloads.
-    let saved = "resume";
-    try { saved = localStorage.getItem("activeTab") || "resume"; } catch (e) { /* ignore */ }
-    if (!VIEWS.includes(saved)) saved = "resume";
+    // Restore the tab the user was last on; default to the Daily Digest landing page.
+    let saved = "digest";
+    try { saved = localStorage.getItem("activeTab") || "digest"; } catch (e) { /* ignore */ }
+    if (!VIEWS.includes(saved)) saved = "digest";
     switchTab(saved);
   }
 

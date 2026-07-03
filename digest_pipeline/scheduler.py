@@ -19,7 +19,8 @@ _stop = threading.Event()
 def _loop(interval: int):
     while not _stop.wait(interval):
         try:
-            digest.run_scheduled_if_due(datetime.now())
+            # Multi-user: send each user's digest when their own send time is due.
+            digest.run_scheduled_for_all_users(datetime.now())
         except Exception:  # noqa: BLE001 - never let the loop die
             pass
 

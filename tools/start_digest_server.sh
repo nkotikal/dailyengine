@@ -5,9 +5,10 @@
 # Logs to data/digest/server.log. Invoked at Windows logon via a hidden VBS +
 # Task Scheduler (see tools/install_startup_task.ps1).
 
-PROJECT="/mnt/c/Users/nkotikal/Desktop/bldr"
+# Project root = the parent of this script's folder (portable; no hardcoded paths).
+PROJECT="$(cd "$(dirname "$0")/.." && pwd)"
 
-# Already running? Do nothing (avoids double-binding port 8000).
+# Already running? Do nothing (avoids double-binding the port).
 if pgrep -f "[s]erver.py" >/dev/null 2>&1; then
   exit 0
 fi

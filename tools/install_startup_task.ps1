@@ -5,7 +5,9 @@
 
 $ErrorActionPreference = "Stop"
 $taskName = "DailyDigestServer"
-$vbs = "C:\Users\nkotikal\Desktop\bldr\tools\start_digest_hidden.vbs"
+# Self-locating: the launcher lives next to this installer (the repo's tools/ folder),
+# so this works wherever the repo is cloned.
+$vbs = Join-Path $PSScriptRoot "start_digest_hidden.vbs"
 
 if (-not (Test-Path $vbs)) { Write-Error "Launcher not found: $vbs"; exit 1 }
 

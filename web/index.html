@@ -3,9 +3,16 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ResumeForge - resume + daily digest</title>
+  <title>DailyEngine</title>
   <link rel="stylesheet" href="/styles.css" />
   <link rel="stylesheet" href="/digest.css" />
+  <script>
+    // Apply the saved theme + pattern before first paint to avoid a flash.
+    try {
+      var t = localStorage.getItem("rf-theme"); if (t) document.documentElement.setAttribute("data-theme", t);
+      var p = localStorage.getItem("rf-pattern"); if (p) document.documentElement.setAttribute("data-pattern", p);
+    } catch (e) {}
+  </script>
 </head>
 <body>
   <!-- animated liquid-glass backdrop -->
@@ -19,20 +26,67 @@
   <main class="shell">
     <header class="hero">
       <div class="hero-mark">RF</div>
-      <div>
-        <h1 id="app-title">ResumeForge</h1>
-        <p class="tagline" id="app-tagline">Paste a job description. Get a tailored, one-page, ATS-ready resume.</p>
+      <div class="hero-text">
+        <h1 id="app-title">Daily Digest</h1>
+        <p class="tagline" id="app-tagline">Feed it your goals and tasks. Get a compartmentalized digest emailed each morning.</p>
+      </div>
+      <div class="theme-switch" title="Pick a color theme.">
+        <span class="theme-ic" aria-hidden="true">&#127912;</span>
+        <select id="theme-select" class="field select" aria-label="Color theme">
+          <option value="aurora">Aurora (default)</option>
+          <option value="dark">Midnight &middot; dark</option>
+          <option value="nord">Nord &middot; calm</option>
+          <option value="sunset">Sunset &middot; warm</option>
+          <option value="forest">Forest &middot; natural</option>
+          <option value="rose">Rose &middot; vibrant</option>
+          <option value="graphite">Graphite &middot; focused</option>
+          <option value="crimson">Crimson &middot; black + red</option>
+          <option value="neon">Neon &middot; bold</option>
+          <option value="daylight">Daylight &middot; light</option>
+        </select>
+        <select id="pattern-select" class="field select" aria-label="Background pattern" title="Background pattern">
+          <optgroup label="Simple">
+            <option value="none">None</option>
+            <option value="dots">Dots</option>
+            <option value="grid">Grid</option>
+          </optgroup>
+          <optgroup label="Ornate">
+            <option value="moroccan">Moroccan</option>
+            <option value="arabesque">Arabesque stars</option>
+            <option value="weave">Flower of life</option>
+            <option value="isometric">Isometric cubes</option>
+          </optgroup>
+          <optgroup label="Fractal">
+            <option value="sierpinski">Sierpinski</option>
+            <option value="hexstar">Nested hexagrams</option>
+          </optgroup>
+          <optgroup label="Glow">
+            <option value="aurora">Aurora glow</option>
+            <option value="nebula">Nebula (glow + grid)</option>
+          </optgroup>
+        </select>
+        <select id="lang-select" class="field select" aria-label="Language" title="Dashboard & report language">
+          <option value="en">EN</option>
+          <option value="ko">&#54620;&#44397;&#50612;</option>
+        </select>
+      </div>
+      <div class="user-switch" id="user-switch" title="Each user has fully separate profile, memory, tasks, and settings.">
+        <span class="user-ic" aria-hidden="true">&#128100;</span>
+        <select id="user-select" class="field select" aria-label="Active user"></select>
+        <button class="btn-glass subtle" id="user-add" type="button">+ New</button>
+        <button class="btn-glass subtle" id="user-rename" type="button">Rename</button>
+        <button class="btn-glass subtle danger" id="user-delete" type="button">Delete</button>
       </div>
     </header>
 
     <nav class="tabs" role="tablist">
-      <button class="tab active" id="tab-resume" type="button" role="tab" aria-selected="true">Resume</button>
-      <button class="tab" id="tab-digest" type="button" role="tab" aria-selected="false">Daily Digest</button>
+      <button class="tab" id="tab-resume" type="button" role="tab" aria-selected="false">Resume</button>
+      <button class="tab active" id="tab-digest" type="button" role="tab" aria-selected="true">Daily Digest</button>
       <button class="tab" id="tab-memory" type="button" role="tab" aria-selected="false">Memory</button>
     </nav>
 
     <!-- ===================== RESUME VIEW ===================== -->
-    <div class="view" id="view-resume">
+    <div class="view" id="view-resume" hidden>
     <section class="chips" id="status-chips" aria-live="polite"></section>
 
     <div class="grid">
@@ -86,6 +140,10 @@
               <option value="claude-opus-4-8">Claude Opus 4.8 (best)</option>
               <option value="claude-sonnet-4-6">Claude Sonnet 4.6 (fast)</option>
               <option value="claude-haiku-4-5">Claude Haiku 4.5 (fastest)</option>
+              <option value="gpt-5.4-mini">GPT-5.4 mini (OpenAI)</option>
+              <option value="gpt-5.4">GPT-5.4 (OpenAI)</option>
+              <option value="gpt-4o-mini">GPT-4o mini (OpenAI)</option>
+              <option value="gpt-4o">GPT-4o (OpenAI)</option>
             </select>
           </label>
 
@@ -215,12 +273,18 @@
     <!-- =================== END RESUME VIEW =================== -->
 
     <!-- ===================== DIGEST VIEW ===================== -->
-    <div class="view" id="view-digest" hidden>
+    <div class="view" id="view-digest">
       <section class="chips" id="digest-chips" aria-live="polite"></section>
 
-      <div class="grid">
-        <!-- LEFT: inputs -->
-        <section class="glass panel">
+      <nav class="subtabs" id="digest-subtabs" role="tablist">
+        <button class="subtab active" type="button" data-sub="digest">Digest</button>
+        <button class="subtab" type="button" data-sub="plan">Plan</button>
+        <button class="subtab" type="button" data-sub="sources">Sources</button>
+        <button class="subtab" type="button" data-sub="learn">Learning</button>
+        <button class="subtab" type="button" data-sub="settings">Settings</button>
+      </nav>
+
+      <section class="glass panel" data-group="plan">
           <div class="section-head">
             <h2>About you</h2>
             <span class="pill ghost">used every morning</span>
@@ -259,10 +323,21 @@
             <button class="btn-glass" id="d-add-update" type="button">Add</button>
           </div>
           <div class="d-updates" id="d-updates"></div>
+
+          <div class="section-head spaced">
+            <h2>Latest reflection</h2>
+            <span class="pill ghost" id="d-reflection-pill" hidden></span>
+          </div>
+          <p class="hint">Reply to your digest email at the end of the day - what you did,
+            what's blocking you, deadlines, and how you want to block the days ahead. It
+            updates your tasks, reminders, weekly goals, schedule, and memory, and shapes
+            tomorrow's opening. This shows the most recent one captured.</p>
+          <div class="d-reflection" id="d-reflection">
+            <div class="d-updates-empty">No reflection captured yet.</div>
+          </div>
         </section>
 
-        <!-- RIGHT: delivery + preview -->
-        <section class="glass panel">
+        <section class="glass panel" data-group="digest">
           <div class="section-head">
             <h2>Delivery</h2>
             <span class="pill" id="d-email-pill">checking...</span>
@@ -281,12 +356,23 @@
               <input type="number" id="d-capacity" class="field" min="1" max="16" step="0.5" value="6" />
             </label>
             <label class="select-wrap">
-              <span>Model</span>
+              <span>Model (primary)</span>
               <select id="d-model" class="field select">
                 <option value="">Default</option>
                 <option value="claude-opus-4-8">Claude Opus 4.8 (best)</option>
                 <option value="claude-sonnet-4-6">Claude Sonnet 4.6 (fast)</option>
                 <option value="claude-haiku-4-5">Claude Haiku 4.5 (fastest)</option>
+              </select>
+            </label>
+            <label class="select-wrap" title="Used if the AMD gateway is unreachable for 1h+. Needs OPENAI_API_KEY in .env.">
+              <span>OpenAI fallback model</span>
+              <select id="d-openai-model" class="field select">
+                <option value="gpt-5.4-mini">GPT-5.4 mini</option>
+                <option value="gpt-5.4">GPT-5.4</option>
+                <option value="gpt-4.1-mini">GPT-4.1 mini</option>
+                <option value="gpt-4o-mini">GPT-4o mini</option>
+                <option value="gpt-4o">GPT-4o</option>
+                <option value="o4-mini">o4-mini</option>
               </select>
             </label>
           </div>
@@ -313,7 +399,7 @@
             <label class="d-check"><input type="checkbox" id="d-inc-schedule" checked /> Schedule</label>
             <label class="d-check"><input type="checkbox" id="d-inc-calendar" checked /> Calendar</label>
             <label class="d-check"><input type="checkbox" id="d-inc-trackers" checked /> Trackers</label>
-            <label class="d-check"><input type="checkbox" id="d-korean" /> Korean</label>
+            <label class="d-check"><input type="checkbox" id="d-korean" /> Language</label>
           </div>
 
           <div class="d-actions">
@@ -323,6 +409,11 @@
             </button>
             <button class="btn-glass" id="d-send" type="button">
               <span class="btn-label">Send now</span>
+              <span class="spinner" hidden></span>
+            </button>
+            <button class="btn-glass" id="d-resend" type="button"
+              title="Saves your current schedule and settings, then rebuilds and re-emails today's digest.">
+              <span class="btn-label">Resend with updates</span>
               <span class="spinner" hidden></span>
             </button>
           </div>
@@ -338,10 +429,27 @@
             <iframe id="d-preview-frame" title="Digest email preview"></iframe>
           </div>
         </section>
-      </div>
+
+      <!-- SCHEDULE (paste your plan for today / tomorrow) -->
+      <section class="glass panel" data-group="digest">
+        <div class="section-head">
+          <h2>Schedule &rarr; Calendar</h2>
+          <span class="pill" id="d-cal-pill">checking...</span>
+        </div>
+        <p class="hint">Paste your planner. Numbers are hours (11 = 11 AM), tabbed lines are tasks/subtasks, and a leading <code>'</code> marks something important. It's parsed into your day and can be pushed to Google Calendar.</p>
+        <textarea id="d-schedule" class="field mono" spellcheck="false" placeholder="11&#10;&#9;'AMD PR&#10;&#9;&#9;Inspect outputs&#10;12&#10;&#9;Lunch&#10;1&#10;&#9;Continue AMD PR"></textarea>
+        <div class="d-actions">
+          <button class="generate" id="d-parse" type="button">
+            <span class="btn-label">Parse &amp; save</span><span class="spinner" hidden></span>
+          </button>
+          <button class="btn-glass" id="d-push-cal" type="button">Push to Google Calendar</button>
+        </div>
+        <div class="d-schedule-note" id="d-cal-note"></div>
+        <div class="d-parsed" id="d-parsed" hidden></div>
+      </section>
 
       <!-- WEEKLY TASKS -->
-      <section class="glass panel">
+      <section class="glass panel" data-group="plan">
         <div class="section-head">
           <h2>Weekly tasks</h2>
           <span class="pill ghost" id="d-wt-pill">0 tasks</span>
@@ -359,6 +467,7 @@
         <div class="d-wt-addrow" id="d-wt-addrow" hidden>
           <input type="text" id="d-wt-input" class="field d-update-input" placeholder="Task..." />
           <select id="d-wt-priority" class="field select d-wt-prio" title="Importance">
+            <option value="critical">Critical</option>
             <option value="high">High</option>
             <option value="medium" selected>Medium</option>
             <option value="low">Low</option>
@@ -370,31 +479,13 @@
         <div class="error" id="d-wt-error" hidden></div>
       </section>
 
-      <!-- SCHEDULE -->
-      <section class="glass panel">
-        <div class="section-head">
-          <h2>Schedule &rarr; Calendar</h2>
-          <span class="pill" id="d-cal-pill">checking...</span>
-        </div>
-        <p class="hint">Paste your planner. Numbers are hours (11 = 11 AM), tabbed lines are tasks/subtasks, and a leading <code>'</code> marks something important. It's parsed into your day and can be pushed to Google Calendar.</p>
-        <textarea id="d-schedule" class="field mono" spellcheck="false" placeholder="11&#10;&#9;'AMD PR&#10;&#9;&#9;Inspect outputs&#10;12&#10;&#9;Lunch&#10;1&#10;&#9;Continue AMD PR"></textarea>
-        <div class="d-actions">
-          <button class="generate" id="d-parse" type="button">
-            <span class="btn-label">Parse &amp; save</span><span class="spinner" hidden></span>
-          </button>
-          <button class="btn-glass" id="d-push-cal" type="button">Push to Google Calendar</button>
-        </div>
-        <div class="d-schedule-note" id="d-cal-note"></div>
-        <div class="d-parsed" id="d-parsed" hidden></div>
-      </section>
-
       <!-- TRACKERS -->
-      <section class="glass panel">
+      <section class="glass panel" data-group="sources">
         <div class="section-head">
           <h2>Trackers</h2>
           <span class="pill ghost" id="d-trackers-pill">0 active</span>
         </div>
-        <p class="hint">Watch things and get "new developments" in your digest: GitHub issues/PRs, a web page or careers site for keywords (e.g. NVIDIA + "intern"), or your inbox.</p>
+        <p class="hint">Watch things and get "new developments" in your digest: GitHub issues/PRs, a web page or careers site for keywords (e.g. Acme + "intern"), or your inbox.</p>
         <div class="d-tracker-list" id="d-tracker-list"></div>
 
         <div class="d-tracker-add">
@@ -405,7 +496,7 @@
             </label>
             <label class="select-wrap">
               <span>Name</span>
-              <input type="text" id="d-tracker-name" class="field" placeholder="e.g. NVIDIA internships" />
+              <input type="text" id="d-tracker-name" class="field" placeholder="e.g. Acme internships" />
             </label>
           </div>
           <div id="d-tracker-fields" class="d-tracker-fields"></div>
@@ -419,29 +510,57 @@
         </div>
       </section>
 
-      <!-- KOREAN -->
-      <section class="glass panel">
+      <!-- LANGUAGE PRACTICE -->
+      <section class="glass panel" data-group="learn">
         <div class="section-head">
-          <h2>Korean practice</h2>
+          <h2>Language practice</h2>
           <span class="pill ghost" id="d-korean-pill">off</span>
         </div>
-        <p class="hint">A structured TOPIK II track: it walks an ordered grammar syllabus and vocab deck, mixes in spaced-repetition reviews of past items, and the AI writes the examples. Past entries are remembered so nothing repeats.</p>
-        <div class="d-korean-progress" id="d-korean-progress"></div>
+        <p class="hint">A daily language lesson folded into your digest. Choose a language; past entries are remembered so nothing repeats. Enable it with the <strong>Language</strong> toggle in Delivery.</p>
+
         <div class="options">
           <label class="select-wrap">
-            <span>Level / placement</span>
-            <select id="d-korean-level" class="field select">
-              <option value="beginner">Beginner (start of TOPIK II)</option>
-              <option value="intermediate" selected>Intermediate (TOPIK 3-4)</option>
-              <option value="intermediate-high">Intermediate-high (jump into TOPIK 4)</option>
-              <option value="advanced">Advanced (TOPIK 4+)</option>
+            <span>Language</span>
+            <select id="d-language" class="field select">
+              <option value="korean">Korean</option>
+              <option value="english">English vocabulary</option>
             </select>
           </label>
-          <label class="select-wrap">
-            <span>&nbsp;</span>
-            <button class="btn-glass subtle" id="d-korean-place" type="button">Set placement</button>
-          </label>
         </div>
+
+        <div class="d-korean-progress" id="d-korean-progress"></div>
+
+        <div id="d-korean-opts">
+          <div class="options">
+            <label class="select-wrap">
+              <span>Korean level / placement</span>
+              <select id="d-korean-level" class="field select">
+                <option value="beginner">Beginner (start of TOPIK II)</option>
+                <option value="intermediate" selected>Intermediate (TOPIK 3-4)</option>
+                <option value="intermediate-high">Intermediate-high (jump into TOPIK 4)</option>
+                <option value="advanced">Advanced (TOPIK 4+)</option>
+              </select>
+            </label>
+            <label class="select-wrap">
+              <span>&nbsp;</span>
+              <button class="btn-glass subtle" id="d-korean-place" type="button">Set placement</button>
+            </label>
+          </div>
+        </div>
+
+        <div id="d-english-opts" hidden>
+          <div class="options">
+            <label class="select-wrap">
+              <span>English vocab level</span>
+              <select id="d-english-level" class="field select">
+                <option value="everyday">Everyday</option>
+                <option value="advanced" selected>Advanced (SAT/GRE)</option>
+                <option value="erudite">Erudite / literary</option>
+              </select>
+            </label>
+          </div>
+        </div>
+
         <div class="d-actions">
           <button class="generate" id="d-korean-preview" type="button">
             <span class="btn-label">Preview today's lesson</span><span class="spinner" hidden></span>
@@ -451,7 +570,7 @@
       </section>
 
       <!-- REMINDERS / DEADLINES -->
-      <section class="glass panel">
+      <section class="glass panel" data-group="plan">
         <div class="section-head">
           <h2>Reminders &amp; deadlines</h2>
           <span class="pill ghost" id="d-reminders-pill">0 active</span>
@@ -486,7 +605,7 @@
       </section>
 
       <!-- HEADLINES & INTERESTS -->
-      <section class="glass panel">
+      <section class="glass panel" data-group="sources">
         <div class="section-head">
           <h2>Headlines &amp; interests</h2>
           <label class="switch-wrap" title="Include a Headlines section in the digest.">
@@ -518,7 +637,7 @@
       </section>
 
       <!-- CLEAR / RESET -->
-      <section class="glass panel">
+      <section class="glass panel" data-group="settings">
         <div class="section-head">
           <h2>Clear &amp; reset</h2>
         </div>
@@ -549,6 +668,21 @@
     <!-- ===================== MEMORY VIEW ===================== -->
     <div class="view" id="view-memory" hidden>
       <section class="chips" id="memory-chips" aria-live="polite"></section>
+
+      <!-- PROFILE (base context, exempt from compression) -->
+      <section class="glass panel">
+        <div class="section-head">
+          <h2>Profile &mdash; base context</h2>
+          <span class="pill good">never compressed</span>
+        </div>
+        <p class="hint">Your stable foundation - who you are, your role, long-running context. Always grounds the digest and is <strong>exempt</strong> from memory compression. Edit it whenever it changes.</p>
+        <textarea id="m-profile" class="field" spellcheck="false" style="min-height:120px"
+          placeholder="e.g. Nikhil - SWE at AMD on ML infra & compilers; PSU; building Dailyengine; learning Korean (TOPIK intermediate); prefers deep-work mornings."></textarea>
+        <div class="row-actions">
+          <button class="link-btn" id="m-profile-save" type="button">Save profile</button>
+          <span class="micro" id="m-profile-status"></span>
+        </div>
+      </section>
 
       <div class="grid">
         <!-- LEFT: add to memory -->
@@ -597,6 +731,10 @@
           <div class="section-head">
             <h2>What it remembers</h2>
             <span class="pill ghost" id="m-count-pill">0 memories</span>
+          </div>
+          <p class="hint">Memories evolve daily: recent, active items stay strong; older, low-importance ones fade and get compressed into the background. Sorted by importance.</p>
+          <div class="d-actions">
+            <button class="btn-glass" id="m-evolve" type="button">Consolidate memory now</button>
           </div>
           <div class="m-filter" id="m-filter"></div>
           <div class="m-list" id="m-list"></div>

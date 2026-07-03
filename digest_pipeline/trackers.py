@@ -23,6 +23,7 @@ from datetime import datetime, timezone
 from email.header import decode_header
 
 from . import jobs as _jobs
+from . import eightfold as _eightfold
 from . import store
 
 _UA = "DailyDigest/1.0 (+local)"
@@ -245,13 +246,14 @@ POLLERS = {
     "web": _poll_web,
     "inbox": _poll_inbox,
     "jobs": _jobs.poll,
+    "eightfold": _eightfold.poll,
 }
 
 TRACKER_TYPES = {
     "github": {
         "label": "GitHub issues / PRs",
         "fields": [
-            {"key": "repo", "label": "Repository (owner/name)", "placeholder": "NVIDIA/cutlass"},
+            {"key": "repo", "label": "Repository (owner/name)", "placeholder": "octocat/Hello-World"},
             {"key": "which", "label": "Track", "type": "select", "options": ["issues", "prs"]},
             {"key": "labels", "label": "Labels filter (optional)", "placeholder": "good first issue"},
         ],
@@ -259,7 +261,7 @@ TRACKER_TYPES = {
     "web": {
         "label": "Web page / job watch",
         "fields": [
-            {"key": "url", "label": "URL", "placeholder": "https://www.nvidia.com/en-us/about-nvidia/careers/"},
+            {"key": "url", "label": "URL", "placeholder": "https://careers.example.com/"},
             {"key": "keywords", "label": "Keywords (comma-sep; blank = any change)",
              "placeholder": "intern, internship, university"},
         ],
@@ -273,10 +275,9 @@ TRACKER_TYPES = {
         ],
     },
     "jobs": {
-        "label": "Job postings (NVIDIA / Workday)",
+        "label": "Job postings (Workday careers)",
         "fields": [
-            {"key": "preset", "label": "Company", "type": "select", "options": ["nvidia", "custom"]},
-            {"key": "cxs_url", "label": "Custom Workday CXS URL (only if 'custom')",
+            {"key": "cxs_url", "label": "Workday CXS jobs URL",
              "placeholder": "https://company.wdN.myworkdayjobs.com/wday/cxs/.../jobs"},
             {"key": "query", "label": "Internship search", "placeholder": "intern"},
             {"key": "include_fulltime", "label": "Also full-time roles that fit my profile", "type": "bool"},
@@ -285,6 +286,22 @@ TRACKER_TYPES = {
             {"key": "locations", "label": "Locations filter (comma, blank = anywhere)", "placeholder": "(any location)"},
             {"key": "profile_keywords", "label": "Profile keywords (blank = from resume + About + Memory)",
              "placeholder": "machine learning, compiler, cuda, gpu"},
+        ],
+    },
+    "eightfold": {
+        "label": "Job postings (Eightfold careers)",
+        "fields": [
+            {"key": "host", "label": "Eightfold host or careers URL",
+             "placeholder": "company.eightfold.ai"},
+            {"key": "domain", "label": "Company domain (optional; auto from host)",
+             "placeholder": "company.com"},
+            {"key": "query", "label": "Internship search", "placeholder": "intern"},
+            {"key": "include_fulltime", "label": "Also full-time roles that fit my profile", "type": "bool"},
+            {"key": "fulltime_query", "label": "Full-time search override (blank = auto from About + Memory)",
+             "placeholder": "machine learning, compiler"},
+            {"key": "locations", "label": "Locations filter (comma, blank = anywhere)", "placeholder": "(any location)"},
+            {"key": "profile_keywords", "label": "Profile keywords (blank = from resume + About + Memory)",
+             "placeholder": "machine learning, compiler, gpu"},
         ],
     },
 }

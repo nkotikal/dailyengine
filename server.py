@@ -18,6 +18,9 @@ import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+import app_paths
+import user_context
+
 from resume_pipeline import compile as texc
 from resume_pipeline.compile import CompileError
 from resume_pipeline import core, llm, store
@@ -29,6 +32,7 @@ from digest_pipeline import store as digest_store
 from digest_pipeline import schedule as digest_schedule
 from digest_pipeline import trackers as digest_trackers
 from digest_pipeline import korean as digest_korean
+from digest_pipeline import english as digest_english
 from digest_pipeline import gcal as digest_gcal
 from digest_pipeline import memory as digest_memory
 from digest_pipeline import tasks as digest_tasks
@@ -40,7 +44,7 @@ from digest_pipeline.llm import DigestLLMError
 from datetime import datetime
 
 ROOT = Path(__file__).resolve().parent
-WEB = ROOT / "web"
+WEB = app_paths.bundle_dir() / "web"
 
 _CONTENT_TYPES = {
     ".html": "text/html; charset=utf-8",
@@ -84,6 +88,8 @@ class Handler(BaseHTTPRequestHandler):
             self._serve_file("index.html")
         elif self.path == "/api/status":
             self._status()
+        elif self.path == "/api/users":
+            self._users_list()
         elif self.path == "/api/profile":
             self._profile_get()
         elif self.path == "/api/profile/versions":
@@ -100,7 +106,15 @@ class Handler(BaseHTTPRequestHandler):
             self._send(404, "Not found", "text/plain; charset=utf-8")
 
     def do_POST(self):
-        if self.path == "/api/generate":
+        if self.path == "/api/users/create":
+            self._users_create()
+        elif self.path == "/api/users/switch":
+            self._users_switch()
+        elif self.path == "/api/users/rename":
+            self._users_rename()
+        elif self.path == "/api/users/delete":
+            self._users_delete()
+        elif self.path == "/api/generate":
             self._generate()
         elif self.path == "/api/reset":
             self._reset()
@@ -156,6 +170,10 @@ class Handler(BaseHTTPRequestHandler):
             self._memory_command()
         elif self.path == "/api/memory/resume":
             self._memory_resume()
+        elif self.path == "/api/memory/profile":
+            self._memory_profile()
+        elif self.path == "/api/memory/evolve":
+            self._memory_evolve()
         elif self.path == "/api/digest/tasks/derive":
             self._tasks_derive()
         elif self.path == "/api/digest/tasks/add":
@@ -180,6 +198,66 @@ class Handler(BaseHTTPRequestHandler):
             self._send(404, "Not found", "text/plain; charset=utf-8")
 
     # -- endpoints ----------------------------------------------------------
+
+    # -- users (per-user compartmentalization) -----------------------------
+
+    def _users_payload(self):
+        return {"ok": True, "users": user_context.list_users(),
+                "active": user_context.get_active()}
+
+    def _users_list(self):
+        self._send_json(200, self._users_payload())
+
+    def _users_create(self):
+        try:
+            data = self._read_json_body()
+        except json.JSONDecodeError:
+            self._send_json(400, {"ok": False, "error": "Invalid request body."})
+            return
+        name = (data.get("name") or "").strip()
+        if not name:
+            self._send_json(400, {"ok": False, "error": "Provide a name for the new user."})
+            return
+        user = user_context.create_user(name)
+        payload = self._users_payload()
+        payload["created"] = user
+        self._send_json(200, payload)
+
+    def _users_switch(self):
+        try:
+            data = self._read_json_body()
+        except json.JSONDecodeError:
+            self._send_json(400, {"ok": False, "error": "Invalid request body."})
+            return
+        try:
+            user_context.set_active(data.get("id", ""))
+        except ValueError as exc:
+            self._send_json(400, {"ok": False, "error": str(exc)})
+            return
+        self._send_json(200, self._users_payload())
+
+    def _users_rename(self):
+        try:
+            data = self._read_json_body()
+        except json.JSONDecodeError:
+            self._send_json(400, {"ok": False, "error": "Invalid request body."})
+            return
+        ok = user_context.rename_user(data.get("id", ""), data.get("name", ""))
+        self._send_json(200 if ok else 404,
+                        {**self._users_payload(), "ok": ok})
+
+    def _users_delete(self):
+        try:
+            data = self._read_json_body()
+        except json.JSONDecodeError:
+            self._send_json(400, {"ok": False, "error": "Invalid request body."})
+            return
+        try:
+            ok = user_context.delete_user(data.get("id", ""))
+        except ValueError as exc:
+            self._send_json(400, {"ok": False, "error": str(exc)})
+            return
+        self._send_json(200, {**self._users_payload(), "ok": ok})
 
     def _status(self):
         self._send_json(200, {
@@ -336,8 +414,11 @@ class Handler(BaseHTTPRequestHandler):
             "schedule": {
                 "raw": sched.get("raw", ""),
                 "updated_at": sched.get("updated_at", ""),
+                "for_date": sched.get("for_date", ""),
                 "counts": digest_schedule.summary_counts(sched.get("parsed", {})) if sched.get("parsed") else {},
             },
+            "reflection": digest_store.load_reflection(),
+            "replies_deferred_at": state.get("replies_deferred_at", ""),
             "trackers": digest_store.list_trackers(),
             "weekly_tasks": digest_store.list_weekly_tasks(),
             "weekly_tasks_summary": digest_tasks.summary(),
@@ -353,10 +434,14 @@ class Handler(BaseHTTPRequestHandler):
             "calendar": digest_gcal.status(),
             "korean": {
                 "enabled": cfg.get("korean_enabled", False),
+                "language": cfg.get("language", "korean"),
                 "level": cfg.get("korean_level", "intermediate"),
+                "english_level": cfg.get("english_level", "advanced"),
                 "history_count": len(digest_store.load_korean().get("history", [])),
                 "seen_vocab": len(digest_store.load_korean().get("seen_vocab", [])),
-                "progress": digest_korean.progress_summary(digest_store.load_korean()),
+                "progress": (digest_english.progress_summary(digest_store.load_english())
+                             if (cfg.get("language") or "korean") == "english"
+                             else digest_korean.progress_summary(digest_store.load_korean())),
             },
             "state": {
                 "last_sent_date": state.get("last_sent_date", ""),
@@ -454,9 +539,29 @@ class Handler(BaseHTTPRequestHandler):
     def _digest_korean_preview(self):
         cfg = digest_store.load_config()
         today = datetime.now().strftime("%Y-%m-%d")
+        language = (cfg.get("language") or "korean").strip().lower()
+        offline = bool(cfg.get("offline")) or (
+            not digest_korean.llm.have_key() and not digest_korean.llm.openai_configured())
+        if language == "english":
+            lesson = digest_store.english_lesson_for(today)
+            if lesson is None:
+                try:
+                    est = digest_store.load_english()
+                    lesson, nst = digest_english.build_lesson(
+                        est, level=cfg.get("english_level", "advanced"),
+                        today=today, model=(cfg.get("model") or None), offline=offline)
+                    digest_store.save_english(nst)
+                except DigestLLMError as exc:
+                    self._send_json(502, {"ok": False, "error": f"LLM error: {exc}"})
+                    return
+            self._send_json(200, {
+                "ok": True, "language": "english", "lesson": lesson,
+                "text": digest_english.render_summary(lesson),
+                "progress": digest_english.progress_summary(digest_store.load_english()),
+            })
+            return
         lesson = digest_store.korean_lesson_for(today)
         if lesson is None:
-            offline = bool(cfg.get("offline")) or not digest_korean.llm.have_key()
             try:
                 kstate = digest_store.load_korean()
                 lesson, new_state = digest_korean.build_lesson(
@@ -468,7 +573,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(502, {"ok": False, "error": f"LLM error: {exc}"})
                 return
         self._send_json(200, {
-            "ok": True, "lesson": lesson,
+            "ok": True, "language": "korean", "lesson": lesson,
             "text": digest_korean.render_summary(lesson),
             "progress": digest_korean.progress_summary(digest_store.load_korean()),
         })
@@ -499,6 +604,7 @@ class Handler(BaseHTTPRequestHandler):
             "ok": True,
             "memories": digest_store.list_memories(),
             "categories": digest_store.MEMORY_CATEGORIES,
+            "profile_base": digest_store.load_profile_base(),
         }
 
     def _memory_list(self):
@@ -713,6 +819,26 @@ class Handler(BaseHTTPRequestHandler):
         node_id = data.get("id") or data.get("sub_id", "")
         digest_store.delete_subtask(node_id)
         self._send_json(200, self._tasks_payload())
+
+    def _memory_profile(self):
+        try:
+            data = self._read_json_body()
+        except json.JSONDecodeError:
+            self._send_json(400, {"ok": False, "error": "Invalid request body."})
+            return
+        digest_store.save_profile_base(data.get("text", "") if isinstance(data, dict) else "")
+        self._send_json(200, self._memory_payload())
+
+    def _memory_evolve(self):
+        cfg = digest_store.load_config()
+        try:
+            result = digest_memory.evolve(model=(cfg.get("model") or None))
+        except Exception as exc:  # noqa: BLE001
+            self._send_json(500, {"ok": False, "error": f"{type(exc).__name__}: {exc}"})
+            return
+        payload = self._memory_payload()
+        payload["evolve"] = result
+        self._send_json(200, payload)
 
     def _digest_config(self):
         try:
@@ -945,7 +1071,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main(argv=None) -> int:
-    core.load_dotenv()
+    core.load_dotenv(app_paths.env_path())
     p = argparse.ArgumentParser(description="Run the resume pipeline web UI.")
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=8765, help="Port to listen on (default 8765).")

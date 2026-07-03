@@ -4,7 +4,9 @@
 
 $ErrorActionPreference = "Stop"
 $taskName = "DailyDigestEmail"
-$vbs = "C:\Users\nkotikal\Desktop\bldr\tools\send_digest_hidden.vbs"
+# Self-locating: the launcher lives next to this installer (the repo's tools/ folder),
+# so this works wherever the repo is cloned.
+$vbs = Join-Path $PSScriptRoot "send_digest_hidden.vbs"
 $time = "07:00"
 
 if (-not (Test-Path $vbs)) { Write-Error "Launcher not found: $vbs"; exit 1 }

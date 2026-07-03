@@ -5,9 +5,9 @@ parsers, time-pressured non-technical recruiters, and deep technical hiring
 managers. This document is injected into the LLM optimizer's instructions and
 should be honored on every generation.
 
-Synthesized from: Google's XYZ formula (Laszlo Bock, *Work Rules!*), NVIDIA
-recruiting guidance (Workday ATS; domain-depth emphasis; VP of Global Recruiting
-Lindsey Duran on measurable outcomes), and consistent 2026 guidance from ATS
+Synthesized from: Google's XYZ formula (Laszlo Bock, *Work Rules!*), big-tech
+hardware/deep-tech recruiting guidance (Workday ATS; domain-depth emphasis;
+measurable outcomes), and consistent 2026 guidance from ATS
 vendors and recruiters (Jobscan, recruiter 6-second-scan studies, "I reviewed
 400 resumes" practitioner reports).
 
@@ -127,7 +127,7 @@ Seniority is communicated by scope language, not years:
 
 Match the language to the level the job description targets, truthfully.
 
-## 8. Technical-depth signals (especially deep-tech / NVIDIA-style roles)
+## 8. Technical-depth signals (especially deep-tech / hardware & systems roles)
 
 - **Depth over breadth.** Specialists beat generalists. Surface concrete domain
   depth (e.g., for systems/GPU roles: CUDA, kernels, memory hierarchy,

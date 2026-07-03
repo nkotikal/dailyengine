@@ -14,6 +14,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+import app_paths
+
 from . import compile as texc
 from .compile import CompileError
 from . import llm, store, tailor
@@ -22,8 +24,8 @@ from .template import Density, build_document
 PROFILE_HINT_KEYS = ("contact", "experience", "education", "skills", "projects")
 
 ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_OUT = ROOT / "output" / "resume.tex"
-DEFAULT_ENV = ROOT / ".env"
+DEFAULT_OUT = app_paths.data_dir() / "output" / "resume.tex"  # writable when frozen
+DEFAULT_ENV = app_paths.env_path()
 
 
 def load_dotenv(path: Path = DEFAULT_ENV) -> None:
@@ -50,7 +52,7 @@ def _configure_ca_bundle() -> None:
     On networks that intercept TLS (Zscaler/Netskope), Python's CA store won't
     trust the proxy's certificates and every HTTPS call fails. If a corporate CA
     bundle is available, we merge it with the system CAs and point SSL_CERT_FILE at
-    the result, fixing the LLM gateway, GitHub, NVIDIA careers, etc. Harmless off
+    the result, fixing the LLM gateway, GitHub, careers sites, etc. Harmless off
     the corporate network (the extra CAs simply go unused).
     """
     import ssl
@@ -234,9 +236,9 @@ def generate(
     auth_style: Optional[str] = None,
     do_compile: bool = True,
     out_path: Path = DEFAULT_OUT,
-    store_path: Path = store.DEFAULT_STORE,
-    optimized_path: Path = store.DEFAULT_OPTIMIZED,
-    context_path: Path = store.DEFAULT_CONTEXT,
+    store_path: Path = None,        # resolves to the active user's store (per-user)
+    optimized_path: Path = None,
+    context_path: Path = None,
 ) -> GenerateResult:
     """Generate (and optionally compile) a tailored resume. See module docstring.
 

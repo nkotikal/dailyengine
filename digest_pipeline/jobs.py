@@ -1,11 +1,11 @@
-"""Job-posting tracker for Workday-backed career sites (e.g. NVIDIA).
+"""Job-posting tracker for Workday-backed career sites.
 
 Queries the careers JSON API for internships (primary) and, optionally, full-time
 roles that fit your profile. Flags postings matching your profile keywords (pulled
 from your stored resume profile when available) and reports only NEW postings.
 
-Add presets for other companies in PRESETS (most large tech firms use Workday;
-you only need the company's CXS "jobs" URL).
+Most large tech firms use Workday; you only need the company's CXS "jobs" URL,
+which you paste into the tracker. Optional named PRESETS can be added below.
 """
 
 import json
@@ -18,14 +18,9 @@ from . import store
 ROOT = Path(__file__).resolve().parent.parent
 RESUME_PROFILE = ROOT / "data" / "profile.json"
 
-# Workday "CXS" job-search endpoints. Add companies here.
-PRESETS = {
-    "nvidia": {
-        "label": "NVIDIA",
-        "cxs": "https://nvidia.wd5.myworkdayjobs.com/wday/cxs/nvidia/NVIDIAExternalCareerSite/jobs",
-        "site_url": "https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite",
-    },
-}
+# Optional Workday "CXS" job-search presets keyed by a short name. Empty by
+# default - paste a company's CXS jobs URL into the tracker's config instead.
+PRESETS = {}
 
 DEFAULT_PROFILE_KEYWORDS = [
     "machine learning", "ml", "deep learning", "ai", "compiler", "cuda", "gpu",
@@ -175,13 +170,13 @@ def _fit(text: str, keywords: list) -> list:
 
 
 def _resolve(cfg: dict):
-    preset = (cfg.get("preset") or "nvidia").strip().lower()
-    if preset in PRESETS and preset != "custom":
+    preset = (cfg.get("preset") or "").strip().lower()
+    if preset and preset in PRESETS:
         p = PRESETS[preset]
         return p["cxs"], p["site_url"]
     cxs = (cfg.get("cxs_url") or "").strip()
     if not cxs:
-        raise ValueError("Custom jobs tracker needs config.cxs_url (a Workday CXS jobs URL).")
+        raise ValueError("Jobs tracker needs config.cxs_url (a Workday CXS jobs URL).")
     site = (cfg.get("site_url") or cxs.split("/wday/")[0]).rstrip("/")
     return cxs, site
 

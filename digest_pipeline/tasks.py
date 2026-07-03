@@ -20,11 +20,14 @@ You turn a person's weekly goals/notes into a concrete, actionable task list for
 the week. The input may be NESTED: lines indented (tabbed) under a line are
 SUBTASKS of that line. Preserve that structure. Respond with ONLY a JSON object:
 
-{ "tasks": [ {"text": "a concrete task starting with a verb", "priority": "high|medium|low",
+{ "tasks": [ {"text": "a concrete task starting with a verb", "priority": "critical|high|medium|low",
               "due": "YYYY-MM-DD or empty", "est_minutes": 0,
-              "subtasks": [ {"text": "a concrete subtask", "subtasks": [ {"text": "deeper step"} ] } ] } ] }
+              "subtasks": [ {"text": "a concrete subtask", "priority": "critical|high|medium|low",
+                             "subtasks": [ {"text": "deeper step"} ] } ] } ] }
 
 Subtasks may nest to ANY depth - mirror however deep the input is tabbed.
+PRIORITY MARKERS: a line starting with ''' (triple apostrophe) is CRITICAL (double
+priority); a single ' is high. Preserve that as the item's "priority".
 
 RULES:
 - Keep the nesting from the input: a tabbed line becomes a subtask of the line above.
@@ -92,20 +95,28 @@ def _indent_level(line: str) -> int:
     return int(n)
 
 
+def _strip_priority(s: str):
+    """Leading apostrophes set priority: ''' (3+) = critical, ' (1-2) = high, else medium."""
+    s = s.strip()
+    n = 0
+    while n < len(s) and s[n] == "'":
+        n += 1
+    pr = "critical" if n >= 3 else ("high" if n >= 1 else "medium")
+    return s[n:].strip(), pr, n >= 1
+
+
 def parse_outline(text: str) -> list:
-    """Parse indented text into a tree: [{text, important, children:[...]}]."""
+    """Parse indented text into a tree: [{text, important, priority, children:[...]}]."""
     roots, stack = [], []  # stack: list of (level, node)
     for raw in (text or "").splitlines():
         if not raw.strip():
             continue
         level = _indent_level(raw)
         s = raw.strip().lstrip("-*\u2022").strip()
-        important = s.startswith("'")
-        if important:
-            s = s[1:].strip()
+        s, priority, important = _strip_priority(s)
         if not s:
             continue
-        node = {"text": s, "important": important, "children": []}
+        node = {"text": s, "important": important, "priority": priority, "children": []}
         while stack and stack[-1][0] >= level:
             stack.pop()
         (stack[-1][1]["children"] if stack else roots).append(node)
@@ -114,9 +125,9 @@ def parse_outline(text: str) -> list:
 
 
 def _children_to_subtasks(children: list) -> list:
-    """Convert outline children into a (recursive) subtask tree, preserving depth."""
-    return [{"text": c["text"], "subtasks": _children_to_subtasks(c["children"])}
-            for c in children]
+    """Convert outline children into a (recursive) subtask tree, preserving depth + priority."""
+    return [{"text": c["text"], "priority": c.get("priority", "medium"),
+             "subtasks": _children_to_subtasks(c["children"])} for c in children]
 
 
 def outline_items(text: str, *, top_priority_from_important: bool = True) -> list:
@@ -125,10 +136,11 @@ def outline_items(text: str, *, top_priority_from_important: bool = True) -> lis
         items = []
         for n in nodes:
             prefix = ("    " * depth) + ("\u21B3 " if depth else "")
+            np = n.get("priority", "medium")
             if depth == 0:
-                pr = "high" if n["important"] else "medium"
+                pr = np
             else:
-                pr = "high" if n["important"] else "low"
+                pr = np if np in ("critical", "high") else "low"
             items.append({"text": prefix + n["text"], "priority": pr})
             items += walk(n["children"], depth + 1)
         return items
@@ -143,18 +155,24 @@ def _fallback(weekly_text: str) -> list:
     for node in parse_outline(weekly_text):
         tasks.append({
             "text": node["text"],
-            "priority": "high" if node["important"] else "medium",
+            "priority": node.get("priority", "medium"),
             "due": "", "est_minutes": 0,
             "subtasks": _children_to_subtasks(node["children"]),
         })
     return tasks
 
 
+_VALID_PR = ("critical", "high", "medium", "low")
+
+
 def _norm_subs(items) -> list:
     out = []
     for s in items or []:
         if isinstance(s, dict) and (s.get("text") or "").strip():
-            out.append({"text": s["text"].strip(), "subtasks": _norm_subs(s.get("subtasks"))})
+            pr = str(s.get("priority", "medium")).lower()
+            out.append({"text": s["text"].strip(),
+                        "priority": pr if pr in _VALID_PR else "medium",
+                        "subtasks": _norm_subs(s.get("subtasks"))})
         elif isinstance(s, str) and s.strip():
             out.append({"text": s.strip(), "subtasks": []})
     return out
@@ -174,7 +192,7 @@ def _normalize_derived(raw_tasks) -> list:
         if due and not re.match(r"^\d{4}-\d{2}-\d{2}$", due):
             due = ""  # only accept ISO dates
         out.append({"text": str(t["text"]).strip(),
-                    "priority": pr if pr in ("high", "medium", "low") else "medium",
+                    "priority": pr if pr in _VALID_PR else "medium",
                     "due": due, "est_minutes": parse_est(t.get("est_minutes")),
                     "subtasks": _norm_subs(t.get("subtasks"))})
     return out
@@ -204,8 +222,22 @@ def derive_and_merge(weekly_text: str, *, model: str | None = None,
 
 # --- triage ----------------------------------------------------------------
 
-_PR_ORDER = {"high": 0, "medium": 1, "low": 2}
-_IMP_WEIGHT = {"high": 3, "medium": 2, "low": 1}
+_PR_ORDER = {"critical": -1, "high": 0, "medium": 1, "low": 2}
+_IMP_WEIGHT = {"critical": 6, "high": 3, "medium": 2, "low": 1}  # critical = double of high
+
+
+def _max_priority(task: dict) -> str:
+    """Highest priority across the task and all its subtasks (critical bubbles up)."""
+    best = task.get("priority", "medium")
+
+    def walk(subs):
+        nonlocal best
+        for s in subs or []:
+            if _IMP_WEIGHT.get(s.get("priority", "medium"), 2) > _IMP_WEIGHT.get(best, 2):
+                best = s.get("priority", "medium")
+            walk(s.get("subtasks"))
+    walk(task.get("subtasks"))
+    return best
 
 
 def _due_days(due: str, today: date):
@@ -250,9 +282,13 @@ def triage_score(task: dict, today: date) -> dict:
 
     Score blends importance, due-date proximity, and (for soon+large work) effort.
     """
-    imp = _IMP_WEIGHT.get(task.get("priority", "medium"), 2)
+    eff_priority = _max_priority(task)
+    imp = _IMP_WEIGHT.get(eff_priority, 2)
     score = imp * 10
     reasons = []
+    if eff_priority == "critical":
+        score += 35  # floor so critical reliably leads even without a deadline
+        reasons.append("CRITICAL (double priority)")
     # Urgency is driven by the most imminent due date in the whole subtree, so a
     # subtask due today makes its parent task urgent too.
     days = _earliest_due_days(task, today)
@@ -276,7 +312,7 @@ def triage_score(task: dict, today: date) -> dict:
         est = int(task.get("est_minutes") or 0)
         if days <= 3 and est >= 120:
             score += 15; reasons.append("sizable & soon")
-    if task.get("priority") == "high":
+    if eff_priority == "high":
         reasons.append("high importance")
     # Build a compact annotation: due + estimate.
     bits = []
@@ -293,10 +329,10 @@ def triage_score(task: dict, today: date) -> dict:
     if est_str:
         bits.append(f"~{est_str}")
     annotation = ", ".join(bits)
-    # Highlight-worthy: imminent (<=3 days incl. overdue) OR high importance.
-    highlight = urgent or task.get("priority") == "high"
+    # Highlight-worthy: imminent (<=3 days incl. overdue) OR high/critical importance.
+    highlight = urgent or eff_priority in ("high", "critical")
     return {"score": score, "urgent": urgent, "highlight": highlight,
-            "reasons": reasons, "annotation": annotation}
+            "eff_priority": eff_priority, "reasons": reasons, "annotation": annotation}
 
 
 def _open(tasks_list):
@@ -330,7 +366,8 @@ def load_summary(today: date | None = None, capacity_minutes: int = 360) -> dict
 # --- rendering -------------------------------------------------------------
 
 def _task_line(t, today, *, with_annotation):
-    star = "(!) " if t.get("priority") == "high" else ""
+    pr = _max_priority(t)
+    star = "\u203c\ufe0f " if pr == "critical" else ("(!) " if pr == "high" else "")
     text = star + t.get("text", "")
     if with_annotation:
         ann = triage_score(t, today)["annotation"]
@@ -376,7 +413,12 @@ def build_sections(today: date | None = None, capacity_minutes: int = 360) -> li
                                "priority": "high" if dtag in ("OVERDUE", "today") else "low"})
                 emit_subs(sub, depth + 1)
         for t, s in focus:
-            pr = "high" if (s["urgent"] or t.get("priority") == "high") else "medium"
+            if s["eff_priority"] == "critical":
+                pr = "critical"
+            elif s["urgent"] or s["eff_priority"] == "high":
+                pr = "high"
+            else:
+                pr = "medium"
             fitems.append({"text": _task_line(t, today, with_annotation=True), "priority": pr})
             emit_subs(t, 1)
         # Headspace: load vs capacity.
@@ -416,8 +458,9 @@ def render_for_llm(today: date | None = None) -> str:
                     key=lambda ts: -ts[1]["score"])
     focus_ids = {t["id"] for t, s in scored if s["highlight"]}
     sm = summary()
-    lines = [f"PROGRESS: {sm['done']}/{sm['total']} top tasks done, "
-             f"{sm['subtasks_done']}/{sm['subtasks']} subtasks done."]
+    lines = [f"PROGRESS: top-level entries are CATEGORIES/areas (not tasks). Across "
+             f"{sm['areas']} areas, {sm['leaf_done']}/{sm['leaf_total']} concrete tasks "
+             f"are done. Frame progress by area, not by counting categories as tasks."]
     for t, s in scored:
         tag = "[FOCUS] " if t["id"] in focus_ids else ""
         meta = []
@@ -455,6 +498,23 @@ def _count_subs(nodes):
     return total, done
 
 
+def _count_leaves(nodes):
+    """Count LEAF items (the actual to-dos). Top-level entries are categories, and a
+    node with children is a grouping, so only childless nodes count as real tasks."""
+    total = done = 0
+    for n in nodes or []:
+        kids = n.get("subtasks") or []
+        if kids:
+            ct, cd = _count_leaves(kids)
+            total += ct
+            done += cd
+        else:
+            total += 1
+            if n.get("done"):
+                done += 1
+    return total, done
+
+
 def summary() -> dict:
     items = store.list_weekly_tasks()
     done = sum(1 for t in items if t.get("done"))
@@ -463,5 +523,7 @@ def summary() -> dict:
         ct, cd = _count_subs(t.get("subtasks"))
         subs += ct
         subs_done += cd
+    leaf_total, leaf_done = _count_leaves(items)
     return {"total": len(items), "done": done, "open": len(items) - done,
-            "subtasks": subs, "subtasks_done": subs_done}
+            "subtasks": subs, "subtasks_done": subs_done,
+            "areas": len(items), "leaf_total": leaf_total, "leaf_done": leaf_done}

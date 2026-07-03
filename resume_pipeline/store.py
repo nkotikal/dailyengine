@@ -12,33 +12,62 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-DEFAULT_STORE = Path(__file__).resolve().parent.parent / "data" / "profile.json"
-DEFAULT_OPTIMIZED = Path(__file__).resolve().parent.parent / "data" / "optimized.json"
-DEFAULT_CONTEXT = Path(__file__).resolve().parent.parent / "data" / "context.txt"
-PROFILES_DIR = Path(__file__).resolve().parent.parent / "data" / "profiles"
+import user_context
+
+# Per-user data isolation: resume files live under the *current* user's folder
+# (data/users/<id>/). Each function defaults to these when no explicit path is
+# given, so the CLI/server automatically operate on the active user.
+
+def _store_path() -> Path:
+    return user_context.resume_dir() / "profile.json"
 
 
-def save_profile(profile: dict, path: Path = DEFAULT_STORE) -> Path:
-    path = Path(path)
+def _optimized_path() -> Path:
+    return user_context.resume_dir() / "optimized.json"
+
+
+def _context_path() -> Path:
+    return user_context.resume_dir() / "context.txt"
+
+
+def _profiles_dir() -> Path:
+    return user_context.resume_dir() / "profiles"
+
+
+def __getattr__(name: str):
+    """Backwards-compatible dynamic constants (resolve to the current user)."""
+    mapping = {
+        "DEFAULT_STORE": _store_path,
+        "DEFAULT_OPTIMIZED": _optimized_path,
+        "DEFAULT_CONTEXT": _context_path,
+        "PROFILES_DIR": _profiles_dir,
+    }
+    if name in mapping:
+        return mapping[name]()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def save_profile(profile: dict, path: Path = None) -> Path:
+    path = Path(path) if path else _store_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(profile, f, indent=2, ensure_ascii=False)
     return path
 
 
-def load_profile(path: Path = DEFAULT_STORE):
-    path = Path(path)
+def load_profile(path: Path = None):
+    path = Path(path) if path else _store_path()
     if not path.exists():
         return None
     with open(path, encoding="utf-8") as f:
         return json.load(f)
 
 
-def has_profile(path: Path = DEFAULT_STORE) -> bool:
-    return Path(path).exists()
+def has_profile(path: Path = None) -> bool:
+    return (Path(path) if path else _store_path()).exists()
 
 
-def profile_name(path: Path = DEFAULT_STORE) -> str:
+def profile_name(path: Path = None) -> str:
     """Return the stored profile's contact name, or '' if none/unreadable."""
     try:
         profile = load_profile(path)
@@ -57,7 +86,7 @@ def _profile_display_name(profile) -> str:
     return str(contact.get("name") or "").strip() if isinstance(contact, dict) else ""
 
 
-def archive_profile(profile: dict, source: str = "", profiles_dir: Path = PROFILES_DIR) -> dict | None:
+def archive_profile(profile: dict, source: str = "", profiles_dir: Path = None) -> dict | None:
     """Save a timestamped snapshot of ``profile`` to the version archive.
 
     Skips writing if it is identical to the most recent snapshot (avoids dupes on
@@ -65,7 +94,7 @@ def archive_profile(profile: dict, source: str = "", profiles_dir: Path = PROFIL
     """
     if not isinstance(profile, dict):
         return None
-    profiles_dir = Path(profiles_dir)
+    profiles_dir = Path(profiles_dir) if profiles_dir else _profiles_dir()
     profiles_dir.mkdir(parents=True, exist_ok=True)
 
     versions = list_profile_versions(profiles_dir)
@@ -89,9 +118,9 @@ def archive_profile(profile: dict, source: str = "", profiles_dir: Path = PROFIL
     return {k: snapshot[k] for k in ("id", "saved_at", "source", "name")}
 
 
-def list_profile_versions(profiles_dir: Path = PROFILES_DIR) -> list:
+def list_profile_versions(profiles_dir: Path = None) -> list:
     """Return version metadata (newest first): [{id, saved_at, source, name}]."""
-    profiles_dir = Path(profiles_dir)
+    profiles_dir = Path(profiles_dir) if profiles_dir else _profiles_dir()
     if not profiles_dir.exists():
         return []
     out = []
@@ -111,9 +140,10 @@ def list_profile_versions(profiles_dir: Path = PROFILES_DIR) -> list:
     return out
 
 
-def load_profile_version(version_id: str, profiles_dir: Path = PROFILES_DIR):
+def load_profile_version(version_id: str, profiles_dir: Path = None):
     """Return the full profile dict for a snapshot id, or None."""
-    p = Path(profiles_dir) / f"{version_id}.json"
+    base = Path(profiles_dir) if profiles_dir else _profiles_dir()
+    p = base / f"{version_id}.json"
     if not p.exists():
         return None
     try:
@@ -123,37 +153,38 @@ def load_profile_version(version_id: str, profiles_dir: Path = PROFILES_DIR):
         return None
 
 
-def delete_profile_version(version_id: str, profiles_dir: Path = PROFILES_DIR) -> bool:
-    p = Path(profiles_dir) / f"{version_id}.json"
+def delete_profile_version(version_id: str, profiles_dir: Path = None) -> bool:
+    base = Path(profiles_dir) if profiles_dir else _profiles_dir()
+    p = base / f"{version_id}.json"
     if p.exists():
         p.unlink()
         return True
     return False
 
 
-def save_optimized(profile: dict, path: Path = DEFAULT_OPTIMIZED) -> Path:
+def save_optimized(profile: dict, path: Path = None) -> Path:
     """Persist the last LLM-optimized profile (regeneration starts from this)."""
-    path = Path(path)
+    path = Path(path) if path else _optimized_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(profile, f, indent=2, ensure_ascii=False)
     return path
 
 
-def load_optimized(path: Path = DEFAULT_OPTIMIZED):
-    path = Path(path)
+def load_optimized(path: Path = None):
+    path = Path(path) if path else _optimized_path()
     if not path.exists():
         return None
     with open(path, encoding="utf-8") as f:
         return json.load(f)
 
 
-def has_optimized(path: Path = DEFAULT_OPTIMIZED) -> bool:
-    return Path(path).exists()
+def has_optimized(path: Path = None) -> bool:
+    return (Path(path) if path else _optimized_path()).exists()
 
 
-def clear_optimized(path: Path = DEFAULT_OPTIMIZED) -> bool:
-    path = Path(path)
+def clear_optimized(path: Path = None) -> bool:
+    path = Path(path) if path else _optimized_path()
     if path.exists():
         path.unlink()
         return True
@@ -161,37 +192,42 @@ def clear_optimized(path: Path = DEFAULT_OPTIMIZED) -> bool:
 
 
 def clear(
-    store_path: Path = DEFAULT_STORE,
-    context_path: Path = DEFAULT_CONTEXT,
-    optimized_path: Path = DEFAULT_OPTIMIZED,
+    store_path: Path = None,
+    context_path: Path = None,
+    optimized_path: Path = None,
 ) -> list:
     """Delete stored profile, optimized draft, and context. Returns names removed."""
     removed = []
-    for p in (Path(store_path), Path(context_path), Path(optimized_path)):
+    paths = (
+        Path(store_path) if store_path else _store_path(),
+        Path(context_path) if context_path else _context_path(),
+        Path(optimized_path) if optimized_path else _optimized_path(),
+    )
+    for p in paths:
         if p.exists():
             p.unlink()
             removed.append(p.name)
     return removed
 
 
-def save_context(text: str, path: Path = DEFAULT_CONTEXT) -> Path:
+def save_context(text: str, path: Path = None) -> Path:
     """Persist the full raw resume text / notes used as LLM context."""
-    path = Path(path)
+    path = Path(path) if path else _context_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text or "", encoding="utf-8")
     return path
 
 
-def append_context(text: str, path: Path = DEFAULT_CONTEXT) -> Path:
+def append_context(text: str, path: Path = None) -> Path:
     """Append incremental notes to the stored context (repeatable gap-filling).
 
     Each note is timestamped so the accumulated context stays readable, and so the
     optimizer can treat later additions as the most current truth.
     """
     text = (text or "").strip()
+    path = Path(path) if path else _context_path()
     if not text:
-        return Path(path)
-    path = Path(path)
+        return path
     path.parent.mkdir(parents=True, exist_ok=True)
     from datetime import datetime
     stamp = datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -201,13 +237,13 @@ def append_context(text: str, path: Path = DEFAULT_CONTEXT) -> Path:
     return path
 
 
-def load_context(path: Path = DEFAULT_CONTEXT) -> str:
-    path = Path(path)
+def load_context(path: Path = None) -> str:
+    path = Path(path) if path else _context_path()
     if not path.exists():
         return ""
     return path.read_text(encoding="utf-8")
 
 
-def has_context(path: Path = DEFAULT_CONTEXT) -> bool:
-    p = Path(path)
+def has_context(path: Path = None) -> bool:
+    p = Path(path) if path else _context_path()
     return p.exists() and bool(p.read_text(encoding="utf-8").strip())

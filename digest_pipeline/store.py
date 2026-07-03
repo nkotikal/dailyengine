@@ -14,18 +14,19 @@ import time
 import uuid
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-DIR = ROOT / "data" / "digest"
-CONFIG_PATH = DIR / "config.json"
-UPDATES_PATH = DIR / "updates.json"
-STATE_PATH = DIR / "state.json"
-SCHEDULE_PATH = DIR / "schedule.json"
-KOREAN_PATH = DIR / "korean.json"
-TRACKERS_PATH = DIR / "trackers.json"
-TRACKER_STATE_PATH = DIR / "tracker_state.json"
-REMINDERS_PATH = DIR / "reminders.json"
-MEMORY_PATH = DIR / "memory.json"
-WEEKLY_TASKS_PATH = DIR / "weekly_tasks.json"
+import user_context
+
+# Per-user data isolation: every path resolves to the *current* user's digest
+# folder (data/users/<id>/digest). HTTP requests use the active user; the
+# scheduler and headless sender switch the current user per-user via
+# ``user_context.using_user``. Nothing here is shared between users.
+
+def _dir() -> Path:
+    return user_context.digest_dir()
+
+
+def _p(name: str) -> Path:
+    return _dir() / name
 
 # Suggested memory buckets (free-form categories are allowed too).
 MEMORY_CATEGORIES = [
@@ -51,9 +52,15 @@ DEFAULT_CONFIG = {
     "include_schedule": True,    # fold today's parsed planner into the digest
     "include_calendar": True,    # pull today's Google Calendar events (if configured)
     "include_trackers": True,    # poll trackers for new developments
-    "korean_enabled": False,     # add a daily Korean lesson
+    "korean_enabled": False,     # add a daily language lesson (name kept for back-compat)
     "korean_level": "intermediate",
+    "language": "korean",        # which language practice: "korean" | "english"
+    "english_level": "advanced", # english vocab level
+    "theme": "",                 # UI color theme for this user ("" = default/aurora)
+    "pattern": "moroccan",       # backdrop geometric pattern
+    "ui_lang": "en",             # dashboard + report language: "en" | "ko" (Korean mode)
     "daily_capacity_hours": 6,   # realistic focus hours/day (headspace / anti-overload)
+    "openai_model": "gpt-5.4-mini",  # OpenAI fallback model (used if AMD gateway is down)
     "news_enabled": True,        # include a Headlines section
     "interests": [],             # topics you care about (shape headline selection)
     "news_sources": [
@@ -72,7 +79,7 @@ def _read_json(path: Path, default):
 
 
 def _write_json(path: Path, obj) -> None:
-    DIR.mkdir(parents=True, exist_ok=True)
+    path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(obj, f, indent=2, ensure_ascii=False)
@@ -84,7 +91,7 @@ def _write_json(path: Path, obj) -> None:
 def load_config() -> dict:
     with _LOCK:
         cfg = dict(DEFAULT_CONFIG)
-        stored = _read_json(CONFIG_PATH, {})
+        stored = _read_json(_p("config.json"), {})
         if isinstance(stored, dict):
             cfg.update({k: stored[k] for k in stored if k in DEFAULT_CONFIG})
         return cfg
@@ -96,7 +103,7 @@ def save_config(updates: dict) -> dict:
         for k, v in (updates or {}).items():
             if k in DEFAULT_CONFIG:
                 cfg[k] = v
-        _write_json(CONFIG_PATH, cfg)
+        _write_json(_p("config.json"), cfg)
         return cfg
 
 
@@ -104,7 +111,7 @@ def save_config(updates: dict) -> dict:
 
 def list_updates() -> list:
     with _LOCK:
-        data = _read_json(UPDATES_PATH, [])
+        data = _read_json(_p("updates.json"), [])
         return data if isinstance(data, list) else []
 
 
@@ -126,7 +133,7 @@ def add_update(text: str) -> dict:
             "included": False,
         }
         items.append(item)
-        _write_json(UPDATES_PATH, items)
+        _write_json(_p("updates.json"), items)
         return item
 
 
@@ -136,7 +143,7 @@ def delete_update(update_id: str) -> bool:
         kept = [u for u in items if u.get("id") != update_id]
         if len(kept) == len(items):
             return False
-        _write_json(UPDATES_PATH, kept)
+        _write_json(_p("updates.json"), kept)
         return True
 
 
@@ -150,7 +157,7 @@ def mark_included(ids) -> None:
         for u in items:
             if u.get("id") in ids:
                 u["included"] = True
-        _write_json(UPDATES_PATH, items)
+        _write_json(_p("updates.json"), items)
 
 
 def clear_included() -> int:
@@ -160,7 +167,7 @@ def clear_included() -> int:
         kept = [u for u in items if not u.get("included")]
         removed = len(items) - len(kept)
         if removed:
-            _write_json(UPDATES_PATH, kept)
+            _write_json(_p("updates.json"), kept)
         return removed
 
 
@@ -168,7 +175,7 @@ def clear_included() -> int:
 
 def load_state() -> dict:
     with _LOCK:
-        data = _read_json(STATE_PATH, {})
+        data = _read_json(_p("state.json"), {})
         return data if isinstance(data, dict) else {}
 
 
@@ -176,8 +183,26 @@ def save_state(updates: dict) -> dict:
     with _LOCK:
         state = load_state()
         state.update(updates or {})
-        _write_json(STATE_PATH, state)
+        _write_json(_p("state.json"), state)
         return state
+
+
+def merge_weekly_goals(lines) -> str:
+    """Append new planning lines to the weekly-goals text (deduped, case-insensitive),
+    so time-blocking / targets from an email reply land in the existing Weekly goals
+    box instead of a new cluttered section. Returns the merged text."""
+    lines = [str(x).strip() for x in (lines or []) if str(x).strip()]
+    if not lines:
+        return load_config().get("weekly_goals", "")
+    with _LOCK:
+        cur = (load_config().get("weekly_goals") or "").rstrip()
+        have = {ln.strip().lower() for ln in cur.splitlines() if ln.strip()}
+        added = [ln for ln in lines if ln.lower() not in have]
+        if not added:
+            return cur
+        merged = (cur + ("\n" if cur else "") + "\n".join(added)).strip()
+        save_config({"weekly_goals": merged})
+        return merged
 
 
 def add_interests(topics) -> list:
@@ -214,7 +239,7 @@ def mark_reply_processed(uid: str) -> None:
         if uid not in seen:
             seen.append(uid)
             st["processed_reply_uids"] = seen[-500:]
-            _write_json(STATE_PATH, st)
+            _write_json(_p("state.json"), st)
 
 
 def claim_send_slot(date_str: str) -> bool:
@@ -224,8 +249,9 @@ def claim_send_slot(date_str: str) -> bool:
     Uses O_CREAT|O_EXCL (atomic file create) so the Windows-task sender and the
     in-server scheduler can never both send the same day, even racing at 07:00.
     """
-    DIR.mkdir(parents=True, exist_ok=True)
-    lock = DIR / f".sent-{date_str}.lock"
+    d = _dir()
+    d.mkdir(parents=True, exist_ok=True)
+    lock = d / f".sent-{date_str}.lock"
     try:
         fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
         os.write(fd, time.strftime("%Y-%m-%d %H:%M:%S").encode())
@@ -235,7 +261,7 @@ def claim_send_slot(date_str: str) -> bool:
     except OSError:
         return False
     # Best-effort cleanup of stale day-locks from previous days.
-    for p in DIR.glob(".sent-*.lock"):
+    for p in d.glob(".sent-*.lock"):
         if p.name != lock.name:
             try:
                 p.unlink()
@@ -247,7 +273,7 @@ def claim_send_slot(date_str: str) -> bool:
 def release_send_slot(date_str: str) -> None:
     """Release a claimed slot (e.g. if the send failed) so a retry can run."""
     try:
-        (DIR / f".sent-{date_str}.lock").unlink()
+        (_dir() / f".sent-{date_str}.lock").unlink()
     except OSError:
         pass
 
@@ -256,23 +282,58 @@ def release_send_slot(date_str: str) -> None:
 
 def load_schedule() -> dict:
     with _LOCK:
-        data = _read_json(SCHEDULE_PATH, {})
+        data = _read_json(_p("schedule.json"), {})
         return data if isinstance(data, dict) else {}
 
 
-def save_schedule(raw: str, parsed: dict) -> dict:
+def save_schedule(raw: str, parsed: dict, for_date: str | None = None) -> dict:
+    """Persist the planner. ``for_date`` (YYYY-MM-DD) is the day this plan is FOR
+    (defaults to today), so the morning digest can tell whether the stored schedule
+    is actually for today or a stale carry-over from a previous day."""
     with _LOCK:
         data = {"raw": raw or "", "parsed": parsed or {},
+                "for_date": (for_date or time.strftime("%Y-%m-%d")),
                 "updated_at": time.strftime("%Y-%m-%d %H:%M:%S")}
-        _write_json(SCHEDULE_PATH, data)
+        _write_json(_p("schedule.json"), data)
         return data
+
+
+# --- end-of-day reflection (blockers / mood / progress; feeds next morning) --
+
+def load_reflection() -> dict:
+    """The most recent end-of-day reflection (or {})."""
+    with _LOCK:
+        data = _read_json(_p("reflection.json"), {})
+        if not isinstance(data, dict):
+            return {}
+        return data.get("latest") or {}
+
+
+def save_reflection(obj: dict) -> dict:
+    """Store the latest reflection (accomplishments, blockers, mood, progress),
+    stamped with today's date, and keep a short history."""
+    with _LOCK:
+        store_obj = _read_json(_p("reflection.json"), {})
+        if not isinstance(store_obj, dict):
+            store_obj = {}
+        latest = dict(obj or {})
+        latest.setdefault("date", time.strftime("%Y-%m-%d"))
+        latest["created_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+        hist = store_obj.get("history")
+        if not isinstance(hist, list):
+            hist = []
+        hist.append(latest)
+        store_obj["latest"] = latest
+        store_obj["history"] = hist[-60:]
+        _write_json(_p("reflection.json"), store_obj)
+        return latest
 
 
 # --- korean learning history ----------------------------------------------
 
 def load_korean() -> dict:
     with _LOCK:
-        data = _read_json(KOREAN_PATH, {})
+        data = _read_json(_p("korean.json"), {})
         if not isinstance(data, dict):
             data = {}
         data.setdefault("history", [])
@@ -289,8 +350,21 @@ def save_korean(state: dict) -> dict:
     """Persist the entire Korean state (progress, srs, placement, history, seen)."""
     with _LOCK:
         state["history"] = state.get("history", [])[-120:]
-        _write_json(KOREAN_PATH, state)
+        _write_json(_p("korean.json"), state)
         return state
+
+
+def save_korean_practice(date_str: str, results: list) -> None:
+    with _LOCK:
+        state = load_korean()
+        prac = state.setdefault("practice", {})
+        prac.setdefault(date_str, [])
+        prac[date_str].extend(results or [])
+        save_korean(state)
+
+
+def get_korean_practice(date_str: str) -> list:
+    return (load_korean().get("practice", {}) or {}).get(date_str, [])
 
 
 def korean_lesson_for(date_str: str):
@@ -301,11 +375,37 @@ def korean_lesson_for(date_str: str):
     return None
 
 
+# --- english vocab practice (separate language track) ----------------------
+
+def load_english() -> dict:
+    with _LOCK:
+        data = _read_json(_p("english.json"), {})
+        if not isinstance(data, dict):
+            data = {}
+        data.setdefault("history", [])
+        data.setdefault("seen_words", [])
+        return data
+
+
+def save_english(state: dict) -> dict:
+    with _LOCK:
+        state["history"] = state.get("history", [])[-120:]
+        _write_json(_p("english.json"), state)
+        return state
+
+
+def english_lesson_for(date_str: str):
+    for entry in load_english().get("history", []):
+        if entry.get("date") == date_str:
+            return entry.get("lesson")
+    return None
+
+
 # --- trackers --------------------------------------------------------------
 
 def list_trackers() -> list:
     with _LOCK:
-        data = _read_json(TRACKERS_PATH, [])
+        data = _read_json(_p("trackers.json"), [])
         return data if isinstance(data, list) else []
 
 
@@ -327,7 +427,7 @@ def add_tracker(ttype: str, name: str, config: dict) -> dict:
             "config": config or {},
         }
         items.append(item)
-        _write_json(TRACKERS_PATH, items)
+        _write_json(_p("trackers.json"), items)
         return item
 
 
@@ -342,7 +442,7 @@ def update_tracker(tracker_id: str, fields: dict) -> bool:
                         t[k] = fields[k]
                 changed = True
         if changed:
-            _write_json(TRACKERS_PATH, items)
+            _write_json(_p("trackers.json"), items)
         return changed
 
 
@@ -352,17 +452,17 @@ def delete_tracker(tracker_id: str) -> bool:
         kept = [t for t in items if t.get("id") != tracker_id]
         if len(kept) == len(items):
             return False
-        _write_json(TRACKERS_PATH, kept)
-        state = _read_json(TRACKER_STATE_PATH, {})
+        _write_json(_p("trackers.json"), kept)
+        state = _read_json(_p("tracker_state.json"), {})
         if isinstance(state, dict) and tracker_id in state:
             del state[tracker_id]
-            _write_json(TRACKER_STATE_PATH, state)
+            _write_json(_p("tracker_state.json"), state)
         return True
 
 
 def get_tracker_state(tracker_id: str) -> dict:
     with _LOCK:
-        state = _read_json(TRACKER_STATE_PATH, {})
+        state = _read_json(_p("tracker_state.json"), {})
         if not isinstance(state, dict):
             return {}
         return state.get(tracker_id, {})
@@ -370,18 +470,18 @@ def get_tracker_state(tracker_id: str) -> dict:
 
 def set_tracker_state(tracker_id: str, new_state: dict) -> None:
     with _LOCK:
-        state = _read_json(TRACKER_STATE_PATH, {})
+        state = _read_json(_p("tracker_state.json"), {})
         if not isinstance(state, dict):
             state = {}
         state[tracker_id] = new_state or {}
-        _write_json(TRACKER_STATE_PATH, state)
+        _write_json(_p("tracker_state.json"), state)
 
 
 # --- reminders / deadlines (persistent, resurface until done) --------------
 
 def list_reminders() -> list:
     with _LOCK:
-        data = _read_json(REMINDERS_PATH, [])
+        data = _read_json(_p("reminders.json"), [])
         return data if isinstance(data, list) else []
 
 
@@ -400,7 +500,7 @@ def add_reminder(text: str, due: str = "", priority: str = "medium") -> dict:
             "done": False,
         }
         items.append(item)
-        _write_json(REMINDERS_PATH, items)
+        _write_json(_p("reminders.json"), items)
         return item
 
 
@@ -415,7 +515,7 @@ def update_reminder(rid: str, fields: dict) -> bool:
                         r[k] = fields[k]
                 changed = True
         if changed:
-            _write_json(REMINDERS_PATH, items)
+            _write_json(_p("reminders.json"), items)
         return changed
 
 
@@ -425,7 +525,7 @@ def delete_reminder(rid: str) -> bool:
         kept = [r for r in items if r.get("id") != rid]
         if len(kept) == len(items):
             return False
-        _write_json(REMINDERS_PATH, kept)
+        _write_json(_p("reminders.json"), kept)
         return True
 
 
@@ -437,7 +537,7 @@ def active_reminders() -> list:
 
 def list_memories() -> list:
     with _LOCK:
-        data = _read_json(MEMORY_PATH, [])
+        data = _read_json(_p("memory.json"), [])
         return data if isinstance(data, list) else []
 
 
@@ -448,7 +548,8 @@ def get_memory(mem_id: str):
     return None
 
 
-def add_memory(text: str, category: str = "fact", source: str = "manual") -> dict:
+def add_memory(text: str, category: str = "fact", source: str = "manual",
+               importance: int = 60) -> dict:
     text = (text or "").strip()
     if not text:
         raise ValueError("Memory text is empty.")
@@ -460,12 +561,34 @@ def add_memory(text: str, category: str = "fact", source: str = "manual") -> dic
             "text": text,
             "category": (category or "fact").strip() or "fact",
             "source": source or "manual",
+            "importance": max(0, min(100, int(importance))),
             "created_at": now,
             "updated_at": now,
+            "last_reinforced": now,
         }
         items.append(item)
-        _write_json(MEMORY_PATH, items)
+        _write_json(_p("memory.json"), items)
         return item
+
+
+def replace_memories(items: list) -> list:
+    """Replace the whole memory list (used by the evolution/compression engine)."""
+    with _LOCK:
+        clean = [m for m in (items or []) if isinstance(m, dict) and m.get("text")]
+        _write_json(_p("memory.json"), clean)
+        return clean
+
+
+def load_profile_base() -> str:
+    p = _p("profile_base.txt")
+    return p.read_text(encoding="utf-8") if p.exists() else ""
+
+
+def save_profile_base(text: str) -> None:
+    with _LOCK:
+        p = _p("profile_base.txt")
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(text or "", encoding="utf-8")
 
 
 def update_memory(mem_id: str, fields: dict) -> bool:
@@ -478,10 +601,16 @@ def update_memory(mem_id: str, fields: dict) -> bool:
                     m["text"] = str(fields["text"]).strip()
                 if "category" in fields and str(fields["category"]).strip():
                     m["category"] = str(fields["category"]).strip()
+                if "importance" in fields:
+                    try:
+                        m["importance"] = max(0, min(100, int(fields["importance"])))
+                    except (TypeError, ValueError):
+                        pass
                 m["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+                m["last_reinforced"] = m["updated_at"]
                 changed = True
         if changed:
-            _write_json(MEMORY_PATH, items)
+            _write_json(_p("memory.json"), items)
         return changed
 
 
@@ -491,7 +620,7 @@ def delete_memory(mem_id: str) -> bool:
         kept = [m for m in items if m.get("id") != mem_id]
         if len(kept) == len(items):
             return False
-        _write_json(MEMORY_PATH, kept)
+        _write_json(_p("memory.json"), kept)
         return True
 
 
@@ -510,12 +639,12 @@ def bulk_add_memories(items: list, source: str = "import") -> list:
 
 def list_weekly_tasks() -> list:
     with _LOCK:
-        data = _read_json(WEEKLY_TASKS_PATH, [])
+        data = _read_json(_p("weekly_tasks.json"), [])
         return data if isinstance(data, list) else []
 
 
 def _save_weekly_tasks(items: list) -> list:
-    _write_json(WEEKLY_TASKS_PATH, items)
+    _write_json(_p("weekly_tasks.json"), items)
     return items
 
 
@@ -532,8 +661,11 @@ def _mk_subtasks(subs) -> list:
         if not text:
             continue
         due = (s.get("due") or "").strip() if isinstance(s, dict) else ""
+        pr = (s.get("priority") if isinstance(s, dict) else "") or "medium"
+        if pr not in ("critical", "high", "medium", "low"):
+            pr = "medium"
         out.append({"id": uuid.uuid4().hex[:8], "text": text, "done": done,
-                    "due": due, "subtasks": _mk_subtasks(kids)})
+                    "due": due, "priority": pr, "subtasks": _mk_subtasks(kids)})
     return out
 
 
@@ -560,7 +692,7 @@ def add_weekly_task(text: str, priority: str = "medium", source: str = "manual",
             "id": uuid.uuid4().hex[:12],
             "text": text,
             "done": False,
-            "priority": priority if priority in ("high", "medium", "low") else "medium",
+            "priority": priority if priority in ("critical", "high", "medium", "low") else "medium",
             "due": (due or "").strip(),
             "est_minutes": int(est_minutes or 0),
             "subtasks": _mk_subtasks(subtasks),
@@ -602,9 +734,10 @@ def update_node(node_id: str, fields: dict) -> bool:
             node["done"] = bool(fields["done"])
         if "due" in fields:  # due dates apply to tasks AND subtasks (feed triage)
             node["due"] = str(fields["due"] or "").strip()
+        if "priority" in fields and fields["priority"] in ("critical", "high", "medium", "low"):
+            node["priority"] = fields["priority"]  # priority applies to any node now
         if siblings is items:  # importance/estimate stay top-level
-            if "priority" in fields and fields["priority"] in ("high", "medium", "low"):
-                node["priority"] = fields["priority"]
+            pass
             if "est_minutes" in fields:
                 try:
                     node["est_minutes"] = max(0, int(fields["est_minutes"] or 0))
@@ -672,7 +805,7 @@ def merge_weekly_tasks(new_items: list, source: str = "derived") -> dict:
             if existing is None:
                 task = {
                     "id": uuid.uuid4().hex[:12], "text": text, "done": False,
-                    "priority": pr if pr in ("high", "medium", "low") else "medium",
+                    "priority": pr if pr in ("critical", "high", "medium", "low") else "medium",
                     "due": due, "est_minutes": est,
                     "subtasks": _mk_subtasks(subs_in),
                     "source": source, "created_at": now, "updated_at": now,
@@ -722,24 +855,27 @@ def clear_category(category: str) -> bool:
                 upd["goals"] = ""  # also wipe the legacy field
             save_config(upd)
         elif cat == "schedule":
-            _write_json(SCHEDULE_PATH, {})
+            _write_json(_p("schedule.json"), {})
         elif cat == "updates":
-            _write_json(UPDATES_PATH, [])
+            _write_json(_p("updates.json"), [])
         elif cat == "reminders":
-            _write_json(REMINDERS_PATH, [])
+            _write_json(_p("reminders.json"), [])
         elif cat == "trackers":
-            _write_json(TRACKERS_PATH, [])
-            _write_json(TRACKER_STATE_PATH, {})
+            _write_json(_p("trackers.json"), [])
+            _write_json(_p("tracker_state.json"), {})
         elif cat == "memory":
-            _write_json(MEMORY_PATH, [])
+            _write_json(_p("memory.json"), [])
+        elif cat == "reflection":
+            _write_json(_p("reflection.json"), {})
         elif cat == "korean":
-            try:
-                KOREAN_PATH.unlink()
-            except FileNotFoundError:
-                pass
+            for fn in ("korean.json", "english.json"):
+                try:
+                    _p(fn).unlink()
+                except FileNotFoundError:
+                    pass
         elif cat == "all":
             for c in ("weekly_tasks", "schedule", "updates", "reminders",
-                      "trackers", "memory", "korean"):
+                      "trackers", "memory", "reflection", "korean"):
                 clear_category(c)
             save_config({"about": "", "goals": "", "weekly_goals": "",
                          "longterm_goals": "", "tasks": ""})

@@ -66,8 +66,10 @@ def fetch_all(sources: list, per_source: int = 30) -> list:
 
 
 def render_for_llm(items: list, limit: int = 30) -> str:
+    """Numbered list so the composer can reference a story by index (ref:N) instead
+    of copying URLs (which it mis-copies, sending links to the wrong story)."""
     lines = []
-    for h in items[:limit]:
+    for i, h in enumerate(items[:limit], start=1):
         meta = f" ({h['points']} pts)" if h.get("points") else ""
-        lines.append(f"- {h['title']}{meta} | {h.get('url','')}")
+        lines.append(f"[{i}] {h['title']}{meta}")
     return "\n".join(lines)

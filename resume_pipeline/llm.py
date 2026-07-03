@@ -24,7 +24,8 @@ ANTHROPIC_VERSION = "2023-06-01"
 DEFAULT_MODEL = "claude-opus-4-8"
 API_KEY_ENV = "ANTHROPIC_API_KEY"
 AUTH_STYLE_ENV = "ANTHROPIC_AUTH_STYLE"   # "x-api-key" (default) or "bearer"
-DEFAULT_MANIFESTO = Path(__file__).resolve().parent.parent / "RESUME_MANIFESTO.md"
+import app_paths  # noqa: E402
+DEFAULT_MANIFESTO = app_paths.bundle_dir() / "RESUME_MANIFESTO.md"
 
 REQUIRED_PROFILE_KEYS = ("contact", "education", "skills", "experience")
 
@@ -261,6 +262,25 @@ def _post_messages(system: str, user: str, *, key: str, model: str, max_tokens: 
     return _parse_json(_extract_text(payload))
 
 
+def _is_openai(model: str | None) -> bool:
+    m = (model or "").lower()
+    return m.startswith(("gpt", "o1", "o3", "o4", "chatgpt"))
+
+
+def _complete(system: str, user: str, *, key, model, max_tokens, timeout,
+              base_url, auth_style) -> dict:
+    """Route to OpenAI for gpt* models, else the Anthropic/AMD gateway."""
+    if _is_openai(model):
+        import openai_compat
+        try:
+            return openai_compat.post_json(system, user, model=model,
+                                           max_tokens=max_tokens, timeout=timeout)
+        except openai_compat.OpenAIError as exc:
+            raise LLMError(str(exc)) from exc
+    return _post_messages(system, user, key=key, model=model, max_tokens=max_tokens,
+                          timeout=timeout, base_url=base_url, auth_style=auth_style)
+
+
 def _require_key(api_key: str | None) -> str:
     key = api_key or os.environ.get(API_KEY_ENV)
     if not key:
@@ -283,11 +303,11 @@ def extract_profile(
     auth_style: str | None = None,
 ) -> dict:
     """Parse raw resume text / notes into the structured profile JSON schema."""
-    key = _require_key(api_key)
+    key = api_key if _is_openai(model) else _require_key(api_key)
     if not source_text or not source_text.strip():
         raise LLMError("No resume text/notes provided to parse into a profile.")
     user = "CANDIDATE MATERIAL:\n" + source_text.strip()
-    profile = _post_messages(
+    profile = _complete(
         EXTRACT_SYSTEM_PROMPT, user, key=key, model=model, max_tokens=max_tokens,
         timeout=timeout, base_url=base_url, auth_style=auth_style,
     )
@@ -320,7 +340,7 @@ def optimize_profile(
     ``extra_context`` is the candidate's full original resume text and any notes;
     it is given to the model as additional grounding (truthful source only).
     """
-    key = _require_key(api_key)
+    key = api_key if _is_openai(model) else _require_key(api_key)
     if not job_description or not job_description.strip():
         raise LLMError("A job description is required for LLM optimization.")
 
@@ -334,7 +354,7 @@ def optimize_profile(
             "structured profile's factual anchors):\n" + extra_context.strip()
         )
 
-    optimized = _post_messages(
+    optimized = _complete(
         _system_prompt(load_manifesto(manifesto_path)), user, key=key, model=model,
         max_tokens=max_tokens, timeout=timeout, base_url=base_url, auth_style=auth_style,
     )

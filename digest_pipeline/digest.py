@@ -8,16 +8,25 @@ import html as _html
 import re
 from datetime import datetime, date
 
-from . import (email_send, gcal, inbox_commands, korean, llm, memory, news,
-               schedule, store, tasks, trackers)
+import user_context
 
-PRIORITY_ORDER = {"high": 0, "medium": 1, "low": 2}
-PRIORITY_COLOR = {"high": "#ff8f9c", "medium": "#ffd479", "low": "#7c9bff"}
+from . import (email_send, english, gcal, inbox_commands, korean, llm, memory,
+               news, schedule, store, tasks, trackers)
+
+# Language practice tracks (the "korean_enabled" flag is the generic on/off switch).
+_LANG_META = {
+    "korean": {"title": "Korean Practice", "icon": "\U0001F1F0\U0001F1F7"},
+    "english": {"title": "English Vocabulary", "icon": "\U0001F4D6"},
+}
+
+PRIORITY_ORDER = {"critical": -1, "high": 0, "medium": 1, "low": 2}
+PRIORITY_COLOR = {"critical": "#ff3d71", "high": "#ff8f9c", "medium": "#ffd479", "low": "#7c9bff"}
 
 # Granular "reference" sections - rendered compact/muted and pushed below the brief.
 DETAIL_TITLES = {
     "schedule", "this week's tasks", "rest of this week", "routine", "tasks",
-    "calendar", "korean practice", "completed", "long-term goals",
+    "calendar", "korean practice", "english vocabulary", "language practice",
+    "completed", "long-term goals",
 }
 
 
@@ -56,24 +65,110 @@ def _reminders_view(when: datetime):
     return "\n".join(lines), rows
 
 
+def _reflection_view(when: datetime):
+    """Return (reflection_text, reflection_obj) for a recent, unconsumed end-of-day
+    reflection so the next morning can address blockers/mood/progress honestly.
+
+    Only surfaces a reflection dated within the last ~2 days that hasn't already been
+    folded into a sent digest."""
+    refl = store.load_reflection()
+    if not refl:
+        return "", None
+    created = refl.get("created_at") or ""
+    if created and created == (store.load_state().get("reflection_consumed_at") or ""):
+        return "", refl
+    try:
+        rdate = date.fromisoformat(refl.get("date", ""))
+        if (when.date() - rdate).days > 2:
+            return "", refl
+    except (ValueError, TypeError):
+        pass
+    lines = []
+    if refl.get("accomplished"):
+        lines.append("Accomplished: " + "; ".join(refl["accomplished"]))
+    if refl.get("blockers"):
+        lines.append("Blockers: " + "; ".join(
+            f"{b.get('type','')}: {b.get('text','')}" for b in refl["blockers"]))
+    if refl.get("whats_next"):
+        lines.append("What's next: " + "; ".join(refl["whats_next"]))
+    if refl.get("mood"):
+        lines.append("Mood: " + refl["mood"])
+    if refl.get("progress_quality"):
+        lines.append("Progress quality: " + refl["progress_quality"])
+    return "\n".join(lines), refl
+
+
+def _rough_day(refl: dict | None) -> bool:
+    """True if the reflection signals a poor day (for honest, real-talk framing)."""
+    if not refl:
+        return False
+    return (refl.get("progress_quality") in ("thin", "poor")
+            or refl.get("mood") in ("rough", "bad"))
+
+
 # --- composition -----------------------------------------------------------
 
-def _korean_items(lesson: dict) -> list:
-    """Flat items for the Korean Practice section (vocab + grammar + tip)."""
+# Gritty fallback lines for offline mode (no LLM). Rotated by day.
+_OFFLINE_MOTIVATION = [
+    "Nobody's coming to do it for you. Good. Go take it.",
+    "Discipline now, or regret later. Pick one and move.",
+    "The work doesn't care how you feel. Start anyway.",
+    "Small, brutal, consistent reps. That's the whole secret.",
+    "You don't rise to your goals; you fall to your habits. Sharpen them today.",
+    "Hard is the point. Do the hard thing first.",
+    "Win the morning, drag the rest of the day with you.",
+    "Quiet grind beats loud excuses. Get to it.",
+]
+
+
+# Honest "real talk" lines for a day that went poorly (offline; no coddling).
+_OFFLINE_ROUGH = [
+    "Yesterday was thin. One bad day is noise; two is a trend. Break it today.",
+    "That wasn't your best and you know it. Good - use the sting. Move.",
+    "Blocked or unmotivated, the deadline doesn't move. So neither do you. Start.",
+    "Own the slow day, then bury it under a good one. Begin now.",
+    "No spin: progress was weak. The fix isn't a feeling, it's the next rep.",
+]
+
+
+def _offline_motivation(d: date, rough: bool = False) -> str:
+    pool = _OFFLINE_ROUGH if rough else _OFFLINE_MOTIVATION
+    return pool[d.toordinal() % len(pool)]
+
+
+def _korean_items(lesson: dict, practice: list | None = None) -> list:
+    """Flat items for the Korean Practice section (vocab + grammar + culture + grading).
+
+    Every example shows the Korean and its English translation.
+    """
     items = []
     for v in (lesson or {}).get("vocab", []):
         rom = f" ({v['romanization']})" if v.get("romanization") else ""
-        t = f"{v.get('korean','')}{rom} \u2014 {v.get('english','')}"
+        pos = f" [{v['pos']}]" if v.get("pos") else ""
+        items.append({"text": f"{v.get('korean','')}{rom} \u2014 {v.get('english','')}{pos}",
+                      "priority": "low", "url": ""})
         if v.get("example_ko"):
-            t += f"  \u00b7  {v['example_ko']}"
-        items.append({"text": t, "priority": "low", "url": ""})
+            ex = v["example_ko"] + (f"  =  {v['example_en']}" if v.get("example_en") else "")
+            items.append({"text": "\u21B3 " + ex, "priority": "low", "url": ""})
     for g in (lesson or {}).get("grammar", []):
-        t = f"{g.get('point','')} \u2014 {g.get('english','')}"
+        form = f"  ({g['form']})" if g.get("form") else ""
+        items.append({"text": f"\U0001F539 {g.get('point','')}{form} \u2014 {g.get('english','')}",
+                      "priority": "low", "url": ""})
         if g.get("example_ko"):
-            t += f"  \u00b7  {g['example_ko']}"
-        items.append({"text": t, "priority": "low", "url": ""})
+            ex = g["example_ko"] + (f"  =  {g['example_en']}" if g.get("example_en") else "")
+            items.append({"text": "\u21B3 " + ex, "priority": "low", "url": ""})
+    if (lesson or {}).get("culture"):
+        items.append({"text": "\U0001F3EF Culture: " + lesson["culture"], "priority": "low", "url": ""})
     if (lesson or {}).get("tip"):
-        items.append({"text": "Tip: " + lesson["tip"], "priority": "low", "url": ""})
+        items.append({"text": "\U0001F4A1 Tip: " + lesson["tip"], "priority": "low", "url": ""})
+    for p in (practice or []):
+        items.append({"text": f"\u270D\uFE0F You: {p.get('sentence','')}  \u2014 {p.get('score','')}/100",
+                      "priority": "low", "url": ""})
+        fb = p.get("feedback", "")
+        if p.get("corrected") and p.get("corrected") != p.get("sentence"):
+            fb = f"\u2192 {p['corrected']}. {fb}"
+        if fb:
+            items.append({"text": "\u21B3 " + fb, "priority": "low", "url": ""})
     return items
 
 
@@ -89,33 +184,83 @@ def _match_news_url(text: str, news_items: list) -> str:
     return best.get("url", "") if best and best_score >= 2 else ""
 
 
-def _finalize_sections(data: dict, *, korean_lesson=None, news_items=None) -> dict:
-    """Post-process the composed digest: real headline links, a complete Korean card
-    (placed above the schedule), and no empty cards."""
+def _resolve_headline_url(item: dict, news_items: list) -> str:
+    """Map a composed headline to the EXACT fetched story URL. Prefers the model's
+    'ref:N' index (reliable); falls back to keeping a real fetched URL, else a
+    best-effort title match. Guarantees links never point to an unrelated place."""
+    u = (item.get("url") or "").strip()
+    m = re.match(r"^(?:ref:|#)\s*(\d+)\s*$", u, re.I)
+    if m:
+        i = int(m.group(1)) - 1
+        if 0 <= i < len(news_items or []):
+            return (news_items[i].get("url") or "").strip()
+        return ""
+    # A raw URL is only trusted if it's actually one of the fetched stories.
+    if u and u in {(h.get("url") or "").strip() for h in (news_items or [])}:
+        return u
+    return _match_news_url(item.get("text", ""), news_items)
+
+
+def _schedule_section(parsed: dict | None, title: str = "Schedule"):
+    """Build a structured, time-chunked Schedule section from the parsed planner.
+
+    Rendered specially (grouped by hour) for an easy-to-read email; goes dead last.
+    """
+    blocks = []
+    for b in (parsed or {}).get("blocks", []):
+        tasks = []
+        for t in b.get("tasks", []):
+            pr = "critical" if t.get("critical") else ("high" if t.get("important") else "medium")
+            subs = [{"text": s.get("text", ""),
+                     "priority": "critical" if s.get("critical") else ("high" if s.get("important") else "medium")}
+                    for s in t.get("subtasks", []) if s.get("text")]
+            if t.get("text"):
+                tasks.append({"text": t["text"], "priority": pr, "subs": subs})
+        if tasks:
+            blocks.append({"time": b.get("time_str", ""), "tasks": tasks})
+    if not blocks:
+        return None
+    return {"title": title, "icon": "\U0001F5D3\uFE0F", "kind": "schedule",
+            "detail": True, "summary": "", "items": [], "blocks": blocks}
+
+
+def _finalize_sections(data: dict, *, news_items=None, lang_title="",
+                       lang_icon="", lang_items=None, schedule=None,
+                       schedule_title="Schedule") -> dict:
+    """Post-process the composed digest: real headline links, a complete language
+    card, a clean time-chunked Schedule (dead last), and no empty cards."""
     secs = data.get("sections", [])
     if news_items:
         for s in secs:
             if s.get("title", "").strip().lower() == "headlines":
+                kept = []
                 for it in s.get("items", []):
-                    if not it.get("url"):
-                        it["url"] = _match_news_url(it.get("text", ""), news_items)
-    if korean_lesson:
-        kitems = _korean_items(korean_lesson)
-        if kitems:
-            secs = [s for s in secs if s.get("title", "").strip().lower() != "korean practice"]
-            ksec = {"title": "Korean Practice", "icon": "\U0001F1F0\U0001F1F7",
-                    "summary": "", "items": kitems}
-            idx = next((i for i, s in enumerate(secs)
-                        if s.get("title", "").strip().lower() == "schedule"), len(secs))
-            secs.insert(idx, ksec)
-    # Drop any empty cards (prevents blank sections).
+                    it["url"] = _resolve_headline_url(it, news_items)
+                    if it["url"]:  # drop any headline we can't link correctly
+                        kept.append(it)
+                s["items"] = kept
+    # Replace whatever schedule the composer produced with our structured one.
+    sched_section = _schedule_section(schedule, schedule_title)
+    if sched_section:
+        secs = [s for s in secs if s.get("title", "").strip().lower() != "schedule"
+                and s.get("kind") != "schedule"]
+    if lang_items:
+        secs = [s for s in secs
+                if s.get("title", "").strip().lower() not in
+                (lang_title.lower(), "korean practice", "english vocabulary")]
+        secs.append({"title": lang_title, "icon": lang_icon, "summary": "",
+                     "items": lang_items, "detail": True})
+    # Drop empty cards (prevents blank sections).
     secs = [s for s in secs if s.get("items") or (s.get("summary") or "").strip()]
+    if sched_section:  # schedule goes at the very end
+        secs.append(sched_section)
     data["sections"] = secs
     return data
 
 
 def _deterministic_digest(cfg, updates, when_human, *, parsed_schedule=None,
-                          calendar_events=None, findings=None, korean_lesson=None,
+                          calendar_events=None, findings=None, lang_title="",
+                          lang_icon="", lang_items=None,
                           reminders=None, weekly_tasks=None, today=None,
                           news_items=None) -> dict:
     """A clean digest without the LLM: organize the raw inputs into sections."""
@@ -123,10 +268,10 @@ def _deterministic_digest(cfg, updates, when_human, *, parsed_schedule=None,
         out = []
         for ln in (blob or "").splitlines():
             s = ln.strip().lstrip("-*").strip()
-            if s:
-                imp = s.startswith("'")
-                out.append({"text": s.lstrip("'").strip(),
-                            "priority": "high" if imp else "medium"})
+            if not s:
+                continue
+            text, pr, _imp = tasks._strip_priority(s)
+            out.append({"text": text, "priority": pr})
         return out
 
     # Build each block, then assemble TOP->BOTTOM like a CEO brief (what matters
@@ -170,7 +315,7 @@ def _deterministic_digest(cfg, updates, when_human, *, parsed_schedule=None,
                 tail = f" (in {x['days']}d, {x['due']})"
             ritems.append({"text": x["text"] + tail, "priority": x["priority"]})
         if ritems:
-            top.append({"title": "Deadlines", "icon": "\u23F0", "items": ritems})
+            top.append({"title": "Reminders", "icon": "\u23F0", "items": ritems})
 
     # Headlines (contextual intel) - near the top, below priorities/deadlines.
     if news_items:
@@ -183,16 +328,10 @@ def _deterministic_digest(cfg, updates, when_human, *, parsed_schedule=None,
     if longterm_items:
         top.append({"title": "Long-Term Goals", "icon": "\U0001F3AF", "items": longterm_items})
 
-    # --- BOTTOM: the granular day. Korean sits ABOVE the full schedule, which is the
-    # most granular item and goes dead last. ---
-    routine_items = tasks.outline_items(cfg.get("tasks", ""))
-    if routine_items:
-        bottom.append({"title": "Routine", "icon": "\u2705", "items": routine_items})
-
-    if korean_lesson:
-        kitems = _korean_items(korean_lesson)
-        if kitems:
-            bottom.append({"title": "Korean Practice", "icon": "\U0001F1F0\U0001F1F7", "items": kitems})
+    # --- BOTTOM: the granular day. Language practice sits ABOVE the full schedule,
+    # which is the most granular item and goes dead last. ---
+    if lang_items:
+        bottom.append({"title": lang_title, "icon": lang_icon, "items": lang_items})
 
     if calendar_events:
         bottom.append({
@@ -210,7 +349,8 @@ def _deterministic_digest(cfg, updates, when_human, *, parsed_schedule=None,
                 txt = f"{b['time_str']} - {t['text']}"
                 if detail:
                     txt += f" ({detail})"
-                items.append({"text": txt, "priority": "high" if t["important"] else "medium"})
+                pr = "critical" if t.get("critical") else ("high" if t["important"] else "medium")
+                items.append({"text": txt, "priority": pr})
         if items:
             bottom.append({"title": "Schedule", "icon": "\U0001F5D3\uFE0F", "items": items})
 
@@ -225,6 +365,7 @@ def _deterministic_digest(cfg, updates, when_human, *, parsed_schedule=None,
         })
 
     return {
+        "motivation": _offline_motivation(today or date.today()),
         "greeting": f"Good morning! Here's your plan for {when_human}.",
         "headline": "",
         "sections": sections,
@@ -237,6 +378,7 @@ def _normalize(data: dict) -> dict:
     if not isinstance(data, dict):
         data = {}
     out = {
+        "motivation": str(data.get("motivation") or "").strip(),
         "greeting": str(data.get("greeting") or "").strip(),
         "headline": str(data.get("headline") or "").strip(),
         "closing": str(data.get("closing") or "").strip(),
@@ -276,11 +418,12 @@ def _normalize(data: dict) -> dict:
 
 
 def build_digest(cfg: dict | None = None, *, when: datetime | None = None,
-                 consume: bool = False) -> dict:
+                 consume: bool = False, allow_defer: bool = False) -> dict:
     """Compose today's digest from every enabled module.
 
     ``consume`` True (a real send) advances tracker state so items aren't repeated;
-    False (a preview) leaves state untouched.
+    False (a preview) leaves state untouched. ``allow_defer`` enables the tiered
+    AMD->OpenAI->offline fallback timeline (may raise SendDeferred before any work).
     """
     cfg = cfg or store.load_config()
     when = when or datetime.now()
@@ -288,19 +431,38 @@ def build_digest(cfg: dict | None = None, *, when: datetime | None = None,
     today_key = when.strftime("%Y-%m-%d")
     warnings = []
 
-    # On a real send, first apply any email replies (complete/add tasks, interests,
-    # preferences) so the morning digest reflects them.
-    if consume:
+    # Choose the LLM provider for this whole run BEFORE any side effects (so a defer
+    # consumes nothing). May raise SendDeferred for scheduled sends.
+    chosen = _choose_llm(cfg, when, allow_defer=allow_defer)
+    llm.set_active("openai" if chosen == "openai" else "anthropic", cfg.get("openai_model"))
+    offline = (chosen == "offline")
+
+    # On a real send with a working LLM: apply email replies first (reflections,
+    # deadlines, plans), then evolve memory once per day so the brief reflects new
+    # activity. When offline we must NOT try to parse replies (it would fail); they
+    # stay unprocessed and we note that they weren't incorporated yet.
+    if consume and not offline:
         try:
             inbox_commands.process_replies(model=(cfg.get("model") or None))
             cfg = store.load_config()  # reflect any preference changes
         except Exception:  # noqa: BLE001 - never let replies break the send
             pass
+        if store.load_state().get("last_memory_evolve") != today_key:
+            try:
+                memory.evolve(model=(cfg.get("model") or None), when=when)
+                store.save_state({"last_memory_evolve": today_key})
+            except Exception:  # noqa: BLE001
+                pass
+    elif consume and offline and inbox_commands.is_configured():
+        warnings.append("Offline: your email reply/reflection couldn't be incorporated "
+                        "and will be applied once the AI is back.")
 
     updates = store.pending_updates()
     update_ids = [u["id"] for u in updates if u.get("id")]
     memory_text = memory.render_for_digest()
+    profile_base = store.load_profile_base()
     reminders_text, reminder_rows = _reminders_view(when)
+    reflection_text, reflection_obj = _reflection_view(when)
     weekly_tasks = store.list_weekly_tasks()
     weekly_tasks_text = tasks.render_for_llm(when.date())
 
@@ -329,16 +491,29 @@ def build_digest(cfg: dict | None = None, *, when: datetime | None = None,
     else:
         focus_load_text = ""
 
-    offline = bool(cfg.get("offline")) or not llm.have_key()
-
     # --- gather module inputs ---
+    # Schedules are dated: only use the stored plan as "today's" if it was saved FOR
+    # today. A stale carry-over is not presented as today's plan; instead we ask the
+    # composer to suggest a light plan (and note it's auto-suggested).
     parsed_schedule = None
     schedule_text = ""
+    schedule_note = ""
     if cfg.get("include_schedule", True):
         sched = store.load_schedule()
-        parsed_schedule = sched.get("parsed") or None
-        if parsed_schedule:
+        stored_parsed = sched.get("parsed") or None
+        for_date = sched.get("for_date") or ""
+        if stored_parsed and for_date == today_key:
+            parsed_schedule = stored_parsed
             schedule_text = schedule.render_text(parsed_schedule)
+        elif stored_parsed:
+            schedule_note = (f"No schedule was set for today; the last saved plan was for "
+                             f"{for_date or 'a previous day'}. Suggest a light, realistic "
+                             f"plan for today from the open tasks and deadlines, and note "
+                             f"it's an auto-suggestion (not one I gave you).")
+        else:
+            schedule_note = ("No schedule was provided for today. Optionally suggest a "
+                             "light plan from the open tasks and deadlines, noting it's "
+                             "an auto-suggestion.")
 
     calendar_events = []
     calendar_text = ""
@@ -356,25 +531,45 @@ def build_digest(cfg: dict | None = None, *, when: datetime | None = None,
         except Exception as exc:  # noqa: BLE001
             warnings.append(f"Trackers error ({exc}).")
 
-    korean_lesson = None
-    korean_text = ""
+    # Language practice (Korean or English vocab), dispatched by cfg.language.
+    language = (cfg.get("language") or "korean").strip().lower()
+    lang_meta = _LANG_META.get(language, _LANG_META["korean"])
+    lang_title, lang_icon = lang_meta["title"], lang_meta["icon"]
+    ui_ko = (cfg.get("ui_lang") or "en").lower().startswith("ko")
+    if ui_ko:  # localize the deterministically-injected section titles
+        lang_title = "\ud55c\uad6d\uc5b4 \uc5f0\uc2b5" if language == "korean" else "\uc601\uc5b4 \uc5b4\ud718"
+    schedule_title = "\uc77c\uc815" if ui_ko else "Schedule"
+    lang_text = ""
+    lang_items = []
     if cfg.get("korean_enabled"):
-        korean_lesson = store.korean_lesson_for(today_key)
-        if korean_lesson is None:
-            try:
-                kstate = store.load_korean()
-                korean_lesson, new_kstate = korean.build_lesson(
-                    kstate,
-                    level=cfg.get("korean_level", "intermediate"),
-                    today=today_key,
-                    model=(cfg.get("model") or None),
-                    offline=offline,
-                )
-                store.save_korean(new_kstate)
-            except llm.DigestLLMError as exc:
-                warnings.append(f"Korean lesson skipped ({exc}).")
-        if korean_lesson:
-            korean_text = korean.render_summary(korean_lesson)
+        if language == "english":
+            lesson = store.english_lesson_for(today_key)
+            if lesson is None:
+                try:
+                    est = store.load_english()
+                    lesson, nst = english.build_lesson(
+                        est, level=cfg.get("english_level", "advanced"),
+                        today=today_key, model=(cfg.get("model") or None), offline=offline)
+                    store.save_english(nst)
+                except llm.DigestLLMError as exc:
+                    warnings.append(f"English lesson skipped ({exc}).")
+            if lesson:
+                lang_text = english.render_summary(lesson)
+                lang_items = english.items(lesson)
+        else:
+            lesson = store.korean_lesson_for(today_key)
+            if lesson is None:
+                try:
+                    kstate = store.load_korean()
+                    lesson, new_kstate = korean.build_lesson(
+                        kstate, level=cfg.get("korean_level", "intermediate"),
+                        today=today_key, model=(cfg.get("model") or None), offline=offline)
+                    store.save_korean(new_kstate)
+                except llm.DigestLLMError as exc:
+                    warnings.append(f"Korean lesson skipped ({exc}).")
+            if lesson:
+                lang_text = korean.render_summary(lesson)
+                lang_items = _korean_items(lesson, store.get_korean_practice(today_key))
 
     # --- compose ---
     used_llm = False
@@ -382,7 +577,8 @@ def build_digest(cfg: dict | None = None, *, when: datetime | None = None,
         data = _deterministic_digest(cfg, updates, when_human,
                                      parsed_schedule=parsed_schedule,
                                      calendar_events=calendar_events,
-                                     findings=findings, korean_lesson=korean_lesson,
+                                     findings=findings, lang_title=lang_title,
+                                     lang_icon=lang_icon, lang_items=lang_items,
                                      reminders=reminder_rows, weekly_tasks=weekly_tasks,
                                      today=when.date(), news_items=news_items)
         if not cfg.get("offline") and not llm.have_key():
@@ -398,15 +594,20 @@ def build_digest(cfg: dict | None = None, *, when: datetime | None = None,
                 when_human=when_human,
                 tone=cfg.get("tone", "friendly and concise"),
                 memory_text=memory_text,
+                profile_base=profile_base,
                 schedule_text=schedule_text,
                 calendar_text=calendar_text,
                 tracker_findings=findings,
-                korean_summary=korean_text,
+                korean_summary=lang_text,
+                language_title=lang_title,
                 reminders_text=reminders_text,
                 weekly_tasks_text=weekly_tasks_text,
                 focus_load_text=focus_load_text,
                 headlines_text=headlines_text,
                 interests=interests,
+                reflection_text=reflection_text,
+                schedule_note=schedule_note,
+                report_lang=cfg.get("ui_lang", "en"),
                 model=(cfg.get("model") or None),
             )
             used_llm = True
@@ -414,13 +615,23 @@ def build_digest(cfg: dict | None = None, *, when: datetime | None = None,
             data = _deterministic_digest(cfg, updates, when_human,
                                          parsed_schedule=parsed_schedule,
                                          calendar_events=calendar_events,
-                                         findings=findings, korean_lesson=korean_lesson,
+                                         findings=findings, lang_title=lang_title,
+                                         lang_icon=lang_icon, lang_items=lang_items,
                                          reminders=reminder_rows, weekly_tasks=weekly_tasks,
                                          today=when.date(), news_items=news_items)
             warnings.append(f"LLM unavailable ({exc}); sent a plain digest instead.")
 
     data = _normalize(data)
-    data = _finalize_sections(data, korean_lesson=korean_lesson, news_items=news_items)
+    data = _finalize_sections(data, news_items=news_items, lang_title=lang_title,
+                              lang_icon=lang_icon, lang_items=lang_items,
+                              schedule=parsed_schedule, schedule_title=schedule_title)
+    if not data.get("motivation"):
+        data["motivation"] = _offline_motivation(when.date(), rough=_rough_day(reflection_obj))
+
+    # On a real send, mark this reflection as consumed so it isn't re-surfaced.
+    if consume and reflection_obj and reflection_text:
+        store.save_state({"reflection_consumed_at": reflection_obj.get("created_at", "")})
+    llm.set_active("anthropic", None)  # reset provider context after the run
     headline = data["headline"] or "Your daily digest"
     subject = f"\u2600\ufe0f Daily Digest \u2014 {when.strftime('%a, %b %d')}"
     return {
@@ -448,6 +659,7 @@ def _esc(s: str) -> str:
 SECTION_THEME = {
     "today's focus": ("#8aa0ff", "rgba(124,155,255,0.16)"),
     "deadlines": ("#ff8f9c", "rgba(255,143,156,0.16)"),
+    "reminders": ("#ff8f9c", "rgba(255,143,156,0.16)"),
     "headlines": ("#5fe6b4", "rgba(95,230,180,0.15)"),
     "what's new": ("#ffd479", "rgba(255,212,121,0.15)"),
     "key developments": ("#ffd479", "rgba(255,212,121,0.15)"),
@@ -507,9 +719,16 @@ def render_html(data: dict, when_human: str) -> str:
         f'<div style="margin-top:12px;font-size:20px;letter-spacing:6px;">'
         f'\U0001F3AF \U0001F4F0 \U0001F4C5 \U0001F1F0\U0001F1F7</div></div>',
     ]
+    if data.get("motivation"):
+        parts.append(
+            f'<div style="margin:16px 4px 4px;padding:16px 18px;border-radius:14px;'
+            f'background:linear-gradient(135deg,#1a1430,#241a2e);border-left:5px solid #ff7eb6;">'
+            f'<div style="font-size:18.5px;line-height:1.5;color:#fff;font-weight:800;'
+            f'font-style:italic;letter-spacing:-0.2px;">{_esc(data["motivation"])}</div></div>'
+        )
     if data.get("greeting"):
         parts.append(
-            f'<p style="font-size:18px;line-height:1.6;color:{text};margin:22px 4px 8px;">'
+            f'<p style="font-size:18px;line-height:1.6;color:{text};margin:18px 4px 8px;">'
             f'{_esc(data["greeting"])}</p>'
         )
     if data.get("headline"):
@@ -526,7 +745,8 @@ def render_html(data: dict, when_human: str) -> str:
     detail_started = False
     for sec in data.get("sections", []):
         title = sec.get("title", "")
-        is_detail = title.strip().lower() in DETAIL_TITLES
+        is_detail = (title.strip().lower() in DETAIL_TITLES
+                     or bool(sec.get("detail")) or sec.get("kind") == "schedule")
         color, tint = _theme(title)
         icon = (sec.get("icon") or "").strip()
 
@@ -537,6 +757,43 @@ def render_html(data: dict, when_human: str) -> str:
                 f'letter-spacing:3px;text-transform:uppercase;color:{faint};font-weight:700;">'
                 f'\u2022 \u2022 \u2022 &nbsp; the granular day &nbsp; \u2022 \u2022 \u2022</div>'
             )
+
+        # Schedule: a clean, time-chunked layout (grouped by hour) instead of a flat list.
+        if sec.get("kind") == "schedule":
+            parts.append(
+                f'<div style="background:{card};border:1px solid #2a2f4d;border-radius:16px;'
+                f'padding:16px 18px 8px;margin:0 4px 16px;box-shadow:0 6px 18px rgba(8,10,30,0.4);">'
+                f'<div style="font-size:15px;font-weight:800;letter-spacing:.4px;'
+                f'text-transform:uppercase;color:{color};margin-bottom:12px;">'
+                f'{_badge(icon, tint)}{_esc(title)}</div>'
+            )
+            for blk in sec.get("blocks", []):
+                parts.append(
+                    f'<div style="display:flex;gap:12px;padding:8px 0;'
+                    f'border-top:1px solid rgba(255,255,255,0.06);">'
+                    f'<div style="flex:0 0 62px;">'
+                    f'<span style="display:inline-block;background:{color};color:#0a0c18;'
+                    f'font-size:11.5px;font-weight:800;padding:3px 8px;border-radius:7px;'
+                    f'white-space:nowrap;">{_esc(blk.get("time", ""))}</span></div>'
+                    f'<div style="flex:1 1 auto;">'
+                )
+                for t in blk.get("tasks", []):
+                    mark = ("\u203c\ufe0f " if t["priority"] == "critical"
+                            else ("\u2b50 " if t["priority"] == "high" else ""))
+                    parts.append(
+                        f'<div style="font-size:15px;line-height:1.5;color:{text};'
+                        f'font-weight:600;margin:0 0 2px;">{mark}{_esc(t["text"])}</div>'
+                    )
+                    for s in t.get("subs", []):
+                        smark = ("\u203c\ufe0f " if s["priority"] == "critical"
+                                 else ("\u2b50 " if s["priority"] == "high" else "\u00b7 "))
+                        parts.append(
+                            f'<div style="font-size:13.5px;line-height:1.45;color:{soft};'
+                            f'margin:1px 0 1px 6px;">{smark}{_esc(s["text"])}</div>'
+                        )
+                parts.append('</div></div>')
+            parts.append('</div>')
+            continue
 
         if is_detail:
             # Colored (not gray) compact card.
@@ -606,6 +863,8 @@ def render_html(data: dict, when_human: str) -> str:
 
 def render_text(data: dict, when_human: str) -> str:
     lines = [f"DAILY DIGEST  -  {when_human}", "=" * 48, ""]
+    if data.get("motivation"):
+        lines += [f">> {data['motivation']}", ""]
     if data.get("greeting"):
         lines += [data["greeting"], ""]
     if data.get("headline"):
@@ -614,6 +873,16 @@ def render_text(data: dict, when_human: str) -> str:
         icon = (sec.get("icon") or "").strip()
         lines.append(f"{icon + ' ' if icon else ''}{sec.get('title','').upper()}")
         lines.append("-" * 40)
+        if sec.get("kind") == "schedule":
+            for blk in sec.get("blocks", []):
+                lines.append(f"  {blk.get('time','')}")
+                for t in blk.get("tasks", []):
+                    mark = "!! " if t["priority"] == "critical" else ("* " if t["priority"] == "high" else "")
+                    lines.append(f"      - {mark}{t['text']}")
+                    for s in t.get("subs", []):
+                        lines.append(f"          . {s['text']}")
+            lines.append("")
+            continue
         if sec.get("summary"):
             lines.append(sec["summary"])
             if sec.get("items"):
@@ -630,10 +899,65 @@ def render_text(data: dict, when_human: str) -> str:
 
 # --- delivery + scheduling -------------------------------------------------
 
-def send_now(cfg: dict | None = None, *, when: datetime | None = None) -> dict:
-    """Build and email the digest immediately. Returns the build result + status."""
+class SendDeferred(Exception):
+    """Raised when a scheduled send is postponed (waiting for a better LLM)."""
+
+
+# Tiered fallback timeline after send time (scheduled sends):
+#   0-1h: AMD gateway only (defer/retry if down)
+#   1-2h: AMD down -> use the chosen OpenAI model
+#   >=2h: both down -> plain offline digest
+_OPENAI_AFTER_HOURS = 1
+_OFFLINE_AFTER_HOURS = 2
+
+
+def _hours_since_send_time(cfg: dict, when: datetime) -> float:
+    send_time = (cfg.get("send_time") or "07:00").strip()
+    try:
+        hh, mm = (int(x) for x in send_time.split(":", 1))
+    except (ValueError, TypeError):
+        hh, mm = 7, 0
+    target = when.replace(hour=hh, minute=mm, second=0, microsecond=0)
+    return (when - target).total_seconds() / 3600.0
+
+
+def _choose_llm(cfg: dict, when: datetime, *, allow_defer: bool):
+    """Decide which provider to use: 'anthropic' | 'openai' | 'offline'.
+
+    Scheduled sends (allow_defer=True) follow the AMD->1h OpenAI->2h offline timeline.
+    Interactive builds (preview/manual) just use the best provider available now.
+    """
+    if cfg.get("offline"):
+        return "offline"
+    anthropic_in_play = llm.have_key()          # is an AMD/Anthropic gateway configured?
+    anthropic_ok = anthropic_in_play and llm.reachable()
+    if anthropic_ok:
+        return "anthropic"
+    openai_ok = llm.openai_configured() and llm.openai_reachable()
+    # No primary gateway configured at all (e.g. AMD gone) -> use OpenAI now; no waiting.
+    if not anthropic_in_play:
+        return "openai" if openai_ok else "offline"
+    if not allow_defer:
+        return "openai" if openai_ok else "offline"
+    elapsed = _hours_since_send_time(cfg, when)
+    if elapsed >= _OFFLINE_AFTER_HOURS:
+        return "openai" if openai_ok else "offline"
+    if elapsed >= _OPENAI_AFTER_HOURS and openai_ok:
+        return "openai"
+    raise SendDeferred("Primary LLM down; waiting before falling back.")
+
+
+def send_now(cfg: dict | None = None, *, when: datetime | None = None,
+             defer_if_llm_down: bool = False) -> dict:
+    """Build and email the digest immediately. Returns the build result + status.
+
+    Scheduled sends pass ``defer_if_llm_down`` so the tiered fallback applies; if the
+    primary LLM is down and it's too early to fall back, ``SendDeferred`` is raised
+    BEFORE building (no side effects consumed) and the caller retries later.
+    """
     cfg = cfg or store.load_config()
-    built = build_digest(cfg, when=when, consume=True)
+    when = when or datetime.now()
+    built = build_digest(cfg, when=when, consume=True, allow_defer=defer_if_llm_down)
     to_addr = (cfg.get("email_to") or "").strip()
     email_send.send_email(
         to_addr=to_addr,
@@ -693,9 +1017,12 @@ def run_scheduled_if_due(when: datetime | None = None) -> dict:
     if not store.claim_send_slot(today):
         return {"sent": False, "reason": "already handled today"}
     try:
-        built = send_now(cfg, when=when)
+        built = send_now(cfg, when=when, defer_if_llm_down=True)
         return {"sent": True, "reason": "sent", "subject": built["subject"],
                 "to": built.get("sent_to", "")}
+    except SendDeferred:
+        store.release_send_slot(today)  # not sent; retry on a later tick
+        return {"sent": False, "reason": "deferred (LLM unreachable; will retry)"}
     except Exception as exc:  # noqa: BLE001 - record and keep the loop alive
         store.release_send_slot(today)  # let a later retry run
         store.save_state({
@@ -703,6 +1030,49 @@ def run_scheduled_if_due(when: datetime | None = None) -> dict:
             "last_error_at": when.strftime("%Y-%m-%d %H:%M:%S"),
         })
         return {"sent": False, "reason": f"error: {exc}"}
+
+
+def run_scheduled_for_all_users(when: datetime | None = None) -> list:
+    """Send each user's digest if it's due (per-user send time + enabled flag).
+
+    Iterates every user with their own isolated data; failures for one user never
+    block the others. Used by both the in-server scheduler and the headless task.
+    """
+    when = when or datetime.now()
+    results = []
+    for u in user_context.list_users():
+        with user_context.using_user(u["id"]):
+            try:
+                res = run_scheduled_if_due(when)
+            except Exception as exc:  # noqa: BLE001 - isolate per-user failures
+                res = {"sent": False, "reason": f"error: {exc}"}
+        results.append({"user": u["id"], "name": u.get("name", ""), **res})
+    return results
+
+
+def force_send_for_all_users(when: datetime | None = None) -> list:
+    """Send every enabled user's digest now, ignoring the send-time/already-sent
+    guards (used by ``send_digest.py --force`` for testing). Still requires a
+    recipient and SMTP to be configured."""
+    when = when or datetime.now()
+    results = []
+    if not email_send.is_configured():
+        return [{"user": "*", "sent": False, "reason": "SMTP not configured"}]
+    for u in user_context.list_users():
+        with user_context.using_user(u["id"]):
+            cfg = store.load_config()
+            to = (cfg.get("email_to") or "").strip()
+            if not to:
+                results.append({"user": u["id"], "name": u.get("name", ""),
+                                "sent": False, "reason": "no recipient"})
+                continue
+            try:
+                built = send_now(cfg, when=when, defer_if_llm_down=False)
+                res = {"sent": True, "reason": "sent", "to": built.get("sent_to", "")}
+            except Exception as exc:  # noqa: BLE001
+                res = {"sent": False, "reason": f"error: {exc}"}
+            results.append({"user": u["id"], "name": u.get("name", ""), **res})
+    return results
 
 
 def next_run_human(cfg: dict | None = None, *, when: datetime | None = None) -> str:

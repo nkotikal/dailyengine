@@ -1,380 +1,326 @@
-# Resume LaTeX Pipeline + Daily Digest
+# Daily Digest + Resume LaTeX Pipeline
 
-Two independent tools served from one local app (switch with the tabs at the top):
+Two independent tools served from one small, dependency-free local app (switch
+with the tabs at the top of the UI):
 
-1. **ResumeForge** — maps a JSON user profile and a target job description into a
-   clean, compilation-ready LaTeX resume using the Jake Gutierrez (`sb2nov`-derived)
-   template. By default, **Claude (Anthropic) is the optimizer** and the result is
-   rendered deterministically and auto-fit to a single page.
-2. **Daily Digest** — feed it info about yourself, your goals, and your daily tasks,
-   log updates as they happen, and it emails you a compartmentalized morning digest
-   of what's new and what to do today. See [Daily Digest](#daily-digest) below.
+1. **Daily Digest** — you tell it about yourself, your goals, your schedule, and
+   your tasks; every morning it emails you a clean, sectioned briefing of what's
+   new and what to do today. You can run the whole thing *by replying to the
+   email* — no need to keep the UI open.
+2. **ResumeForge** — maps a profile (JSON, plain text, or an uploaded PDF) and a
+   target job description into a compilation-ready, ATS-friendly LaTeX resume,
+   auto-fit to a single page.
 
-The Daily Digest is fully isolated in `digest_pipeline/` and `web/digest.{css,js}`;
-it shares only the `.env` (LLM gateway) and the local server process.
+Everything is Python **standard library only** — no `pip install` step. The only
+moving parts are a `.env` file (your keys) and a local server process.
 
-## How it works
+---
 
-```
-profile.json + job description
-        |
-        v
-  [LLM optimize]  (Claude, default)   <-- rewrites/reorders/selects, truthfully
-        |  (optimized profile JSON, same schema)
-        v
-  [deterministic render]  escaping + exact template
-        |
-        v
-  [one-page auto-fit]  pdflatex + pdfinfo
-        |
-        v
-   output/resume.tex + output/resume.pdf
+## Quick start (clone → running in ~10 min)
+
+This is built to run on **Windows + WSL (Ubuntu)**. (It also runs on plain
+Linux/macOS — only the Windows auto-start scripts in `tools/` are Windows-specific.)
+
+### 1. Clone the repo (inside WSL)
+
+```bash
+git clone <your-repo-url> bldr
+cd bldr
 ```
 
-In `--deterministic` mode the LLM step is replaced by keyword scoring/ordering.
-
-## Highlights
-
-- **LLM optimization (default).** Claude rewrites, reorders, and selects content
-  against the job description for ATS, recruiter, and hiring-manager appeal, and
-  returns an optimized profile in the same JSON schema. Truthful by instruction:
-  it may rephrase boldly and surface genuinely implied skills, but does not
-  invent employers, titles, dates, degrees, or metrics. Runs at `temperature=0`.
-- **Strict template fidelity.** The baseline preamble, custom macros, and
-  `\titleformat`/`\addtolength` definitions are reproduced exactly. No new LaTeX
-  packages are introduced.
-- **Deterministic rendering.** Whatever profile is rendered (LLM-optimized or
-  raw) maps directly to `\resumeSubheading`, `\resumeProjectHeading`, and
-  `\resumeItem` macros.
-- **Full LaTeX escaping.** `% & _ $ #` (plus `{ } ~ ^ \ < >`) are escaped in
-  every field to avoid compiler panics and glyph errors.
-- **Deterministic mode.** With `--deterministic`, job-description keywords
-  re-order skills and bullets by relevance and trim the weakest content when
-  space is tight. No API key needed.
-- **Stored profile.** Your profile is saved after the first run, so future runs
-  only need the job description.
-- **One-page auto-fit.** Compiles with `pdflatex` and escalates an ATS-safe
-  ladder (extra vertical room -> mild spacing -> wider lines -> content trim ->
-  10pt) until the PDF is exactly one page. It never goes below 10pt or below the
-  bullet floors that keep the resume readable and parseable.
-
-## The resume manifesto
-
-[`RESUME_MANIFESTO.md`](RESUME_MANIFESTO.md) is a reference standard for what
-makes a resume pass every gate -- ATS parsers, the recruiter 6-second scan, and
-deep technical hiring managers. It synthesizes Google's XYZ bullet formula
-(Laszlo Bock), NVIDIA recruiting guidance (Workday ATS, domain-depth, measurable
-outcomes), and 2026 ATS/recruiter best practices. It is **auto-loaded and
-injected into the LLM optimizer's system prompt on every generation**, so Claude
-applies these principles when rewriting/ordering/selecting content. Edit the file
-to tune the optimization philosophy; no code changes needed.
-
-## LLM configuration
-
-- Provide your key one of three ways (checked in this order of precedence):
-  1. `--api-key sk-ant-...` flag
-  2. `ANTHROPIC_API_KEY` environment variable
-  3. a `.env` file in the project root (auto-loaded)
-- `.env` setup: `cp .env.example .env`, then put your key in it. `.env` is
-  gitignored. Real environment variables override `.env` values.
-
-```
-# .env
-ANTHROPIC_API_KEY=sk-ant-...
-# optional:
-ANTHROPIC_MODEL=claude-sonnet-4-6
-```
-
-- Default model: `claude-opus-4-8`. Override with `--model claude-sonnet-4-6`
-  (faster/cheaper), the `ANTHROPIC_MODEL` env/.env value, or any current id.
-- LLM mode is **required** by default: without a key it errors. Use
-  `--deterministic` to run fully offline.
-- Uses the Anthropic Messages API via the Python standard library (no pip deps).
-
-### Using an internal / corporate gateway
-
-The client can target any Anthropic-compatible gateway instead of the public API:
-
-- `--base-url` or `ANTHROPIC_BASE_URL` -- gateway base (no `/v1` suffix).
-- `--auth-style` or `ANTHROPIC_AUTH_STYLE` -- `x-api-key` (default), `bearer`
-  (`Authorization: Bearer <key>`), or `apim` (Azure API Management's
-  `Ocp-Apim-Subscription-Key`, used by gateways fronted by Azure APIM).
-
-Example `.env` for an Azure-APIM-fronted Anthropic gateway:
-
-```
-ANTHROPIC_API_KEY=<your-subscription-key>
-ANTHROPIC_BASE_URL=https://your-llm-gateway.example.com/Anthropic
-ANTHROPIC_AUTH_STYLE=apim
-```
-
-The request is sent to `<base-url>/v1/messages`.
-
-## Requirements
-
-- Run inside WSL (Ubuntu). Python 3.x (standard library only).
-- One-time system install for compilation:
+### 2. Install system packages (one time)
 
 ```bash
 sudo apt-get update
+# Python is usually already present; this makes sure:
+sudo apt-get install -y python3
+# Only needed for the RESUME tool (LaTeX compile + PDF text extraction):
 sudo apt-get install -y \
   texlive-latex-base texlive-latex-recommended texlive-latex-extra \
   texlive-fonts-recommended texlive-fonts-extra poppler-utils
 ```
 
-`texlive-*` supplies `pdflatex` and every package the template uses;
-`poppler-utils` supplies `pdfinfo` for page counting. (Without `pdfinfo`, the
-pipeline falls back to parsing the PDF directly.)
+If you only want the Daily Digest, you can skip the `texlive-*` / `poppler-utils`
+line.
 
-## Web UI (liquid glass)
-
-A local web app with an Apple-style liquid-glass interface: an optional
-profile/context area (required only on the first run, when no profile is stored)
-and a job-description field, with a live one-page PDF preview and downloads.
+### 3. Configure `.env`
 
 ```bash
-python3 server.py            # then open http://127.0.0.1:8765
+cp .env.example .env
 ```
 
-It reads the same `.env` (key, gateway, model), auto-detects whether a profile is
-stored, runs the LLM optimization (or offline mode via the toggle), compiles to a
-single page, and previews the PDF inline. Stdlib-only (no web framework). Use the
-tabs at the top to switch between **Resume** and **Daily Digest**.
+Then edit `.env` and set, at minimum:
 
-The Context area accepts any of: a **PDF resume** (uploaded), **plain resume
-text**, free-form **notes**, or a **profile JSON**. Free text / PDFs are parsed by
-the LLM into the structured profile, and your full original resume text is also
-passed to the optimizer as grounding context. The parsed profile and context are
-saved, so later runs need only a job description.
+- An **LLM key** so the digest/resume can be written by AI (see
+  [LLM providers](#llm-providers) below). The simplest durable choice:
 
-### Coverage gaps (repeatable loop)
+  ```
+  OPENAI_API_KEY=sk-...
+  ```
 
-Each AI run also returns a ranked list of **coverage gaps** — job-description
-requirements the optimizer could not *truthfully* fit into your resume — each with
-an importance score (0–100%), why it matters, and a suggestion. In the UI these
-appear in a **Coverage gaps** panel with a per-gap input; on the CLI they print
-under `[gaps]`.
+- **Email sending** (so the morning digest can actually be delivered). Gmail
+  example — use an **App Password**, not your normal password:
 
-If a gap actually applies to you, add the real details (per-gap inputs or
-`--notes "..."`). Those notes are **appended to your stored context** (not used to
-rebuild the profile), so every regeneration has more truthful material to work with
-and the gaps shrink. Repeat until the resume covers the role.
+  ```
+  SMTP_HOST=smtp.gmail.com
+  SMTP_PORT=587
+  SMTP_USER=you@gmail.com
+  SMTP_PASSWORD=your-16-char-app-password
+  SMTP_FROM=you@gmail.com
+  SMTP_SECURITY=starttls
+  ```
 
-## Daily Digest
+  > Gmail App Password: enable 2-Step Verification, then create one at
+  > Google Account → Security → App passwords. The same password also works for
+  > the optional IMAP "inbox" tracker and for reading your email replies.
 
-A separate engine (open the **Daily Digest** tab) that emails you a
-compartmentalized morning digest of what's new and what to do today.
+`.env` is gitignored — your keys never get committed.
 
-**What you give it** (saved and reused every morning):
-- **About you** — role, context, working style.
-- **Goals** — longer-term objectives.
-- **Recurring / standing tasks** — what you do daily/weekly.
-- **Updates** — short notes you log as things happen. Each digest summarizes these
-  into a "What's New" section and then clears them, so tomorrow only shows new ones.
-
-**What it produces:** a clean, sectioned digest (Today's Focus, Tasks, What's New,
-Goal Progress, Reminders) rendered as an HTML email, composed by the LLM (or a plain
-deterministic layout in **Offline mode** / when no key is set).
-
-**Delivery:** set a recipient and send time in the UI, flip on **Morning auto-send**,
-and a background scheduler emails it each morning *while the server is running* (it
-catches up if the machine was asleep at the exact time, as long as the server is up
-later that morning). Use **Preview digest** to see it, or **Send now** to test.
-
-**Email setup** (one time, in `.env` — secrets stay out of the UI):
+### 4. Run the app
 
 ```bash
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_USER=you@gmail.com
-SMTP_PASSWORD=your-app-password     # Gmail: an App Password, not your login
-SMTP_FROM=you@gmail.com
-SMTP_SECURITY=starttls              # starttls (default) | ssl | none
+python3 server.py
 ```
 
-### Modules
+Open **http://127.0.0.1:8765**. The landing tab is **Daily Digest**.
 
-- **Schedule → Calendar.** Paste your planner (numbers = hours, e.g. `11` = 11 AM;
-  tabbed lines = tasks/subtasks; a leading `'` marks important). It's parsed into a
-  time-blocked day (no information loss — every task/subtask is preserved in the
-  digest) and can be **pushed to Google Calendar**. The calendar account is set via
-  `GOOGLE_*` env vars and is switchable any time.
-- **Trackers** (add as many as you like, any time):
+### 5. Set yourself up in the UI
+
+In the **Daily Digest** tab: fill in *About you*, *Goals*, your *Schedule* and
+*Tasks*, set the **recipient email** and **send time**, then click **Preview
+digest** to see it and **Send now** to email a test.
+
+That's the whole loop. To make it run **every morning by itself**, see
+[Run it every morning automatically](#run-it-every-morning-automatically).
+
+---
+
+## LLM providers
+
+The app writes your digest (and optimizes resumes) with an LLM. It supports two
+backends plus an offline fallback, chosen automatically:
+
+| Provider | When it's used | `.env` keys |
+| --- | --- | --- |
+| **OpenAI** (or any OpenAI-compatible endpoint) | The durable default. Used immediately if no Anthropic/AMD gateway is configured. | `OPENAI_API_KEY` (and optional `OPENAI_BASE_URL`) |
+| **Anthropic / internal gateway** | Used first *if configured and reachable* (e.g. a corporate AMD gateway on VPN). | `ANTHROPIC_API_KEY`, optional `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_STYLE` |
+| **Offline** | No key, or all gateways unreachable. Produces a plain deterministic layout. | none |
+
+**Going forward, OpenAI is all you need.** If you don't set any
+`ANTHROPIC_*` values, the app skips the gateway entirely and uses OpenAI right
+away (no waiting). Pick a `gpt-*` model in the **Model** dropdown in either tab.
+
+If you *do* have a reachable Anthropic-compatible gateway, it's tried first; if
+it's down, the scheduled morning send waits up to 1h for it to come back, then
+falls back to OpenAI, then to offline after 2h — so a flaky VPN never produces a
+gutted digest.
+
+```
+# .env — minimal, OpenAI-only
+OPENAI_API_KEY=sk-...
+# optional: a non-OpenAI compatible endpoint
+# OPENAI_BASE_URL=https://api.openai.com/v1
+```
+
+---
+
+## Run it every morning automatically
+
+Two tiny PowerShell installers register Windows Scheduled Tasks. They are
+**self-locating** — run them from wherever you cloned the repo and they wire up
+the correct paths automatically. Run them in **PowerShell** from the repo's
+`tools` folder:
+
+```powershell
+# 1) Email the digest every day at 07:00 (this is the actual "cron").
+powershell -ExecutionPolicy Bypass -File .\tools\install_email_task.ps1
+
+# 2) (Optional) Keep the web UI running at logon, so you can open the dashboard
+#    any time and so an in-app scheduler can catch up if a send was missed.
+powershell -ExecutionPolicy Bypass -File .\tools\install_startup_task.ps1
+```
+
+Both run hidden via WSL (no console window). To change the send time, edit
+`$time` in `install_email_task.ps1` and re-run it. To remove them:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\uninstall_email_task.ps1
+powershell -ExecutionPolicy Bypass -File .\tools\uninstall_startup_task.ps1
+```
+
+Test a send immediately (bypasses the once-per-day guard):
+
+```bash
+python3 tools/send_digest.py --force
+```
+
+Logs land in `data/digest/send.log` and `data/digest/server.log`.
+
+---
+
+## Manage it by replying to the email
+
+You don't have to open the UI day-to-day. Reply to the morning digest in plain
+English and the next run applies it (this uses the IMAP creds in `.env`, e.g. the
+same Gmail App Password):
+
+- "Done: ship the API docs" → marks that task complete.
+- "Add task: review Q3 budget, high priority, due Friday" → adds it.
+- "I switched teams to Platform Infra" → updates your long-term memory.
+- "More interested in GPU/CUDA news, less in crypto" → tunes news/interests.
+- Reply with a Korean sentence → it gets graded in the next lesson.
+
+Enable IMAP reading in `.env`:
+
+```
+IMAP_HOST=imap.gmail.com
+IMAP_PORT=993
+IMAP_USER=you@gmail.com
+IMAP_PASSWORD=your-app-password
+```
+
+---
+
+## Multiple users (compartmentalization)
+
+The app supports multiple, fully isolated users on one machine — no profiles,
+memories, tasks, schedules, reminders, trackers, Korean history, or settings ever
+overlap. Use the **user picker in the top-right header** to switch, add, rename,
+or delete a user. Each user's data lives in its own tree:
+
+```
+data/users/<id>/digest/...     daily-digest data
+data/users/<id>/profile.json   resume profile (+ optimized.json, context.txt, profiles/)
+data/users.json                registry (user list + active user)
+```
+
+- **Switching** changes whose data every tab shows; the page reloads to repopulate.
+- **Email is per-user:** each user has their own recipient + send time, and the
+  morning scheduler emails every auto-send-enabled user their own digest. Replies
+  are matched per user, so everyone can manage their own digest by email.
+- **Migration:** the first run on a pre-multi-user install automatically moves your
+  existing data into a `default` user — nothing is lost.
+- There's no database; it's plain JSON files, so backing up or moving a user is
+  just copying their folder.
+
+## Daily Digest features
+
+**What you give it** (saved and reused every morning): *About you*, *Goals*,
+*Schedule*, and *Tasks*. You also log short **Updates** as things happen; each
+digest summarizes them into "What's New" and clears them.
+
+**What it produces:** a sectioned HTML email — a daily motivational hook, Today's
+Focus, Schedule, Weekly/Daily tasks (with nested subtasks, priorities, due dates,
+time estimates, and triage), What's New, Reminders (deadline warnings), news
+headlines filtered to your interests, Goal Progress (counts leaf tasks), and a
+Korean lesson.
+
+- **Priorities.** A leading `'` on a task = High; `'''` = **Critical** (weighted
+  higher in triage and styled distinctly).
+- **Schedule.** Paste a planner (numbers = hours, e.g. `11` = 11 AM; tabbed lines
+  = subtasks). Optionally push to **Google Calendar** (see `.env` `GOOGLE_*`).
+- **Trackers** (add any number, any time):
   - `github` — new issues/PRs in a repo (optional `GITHUB_TOKEN`).
-  - `web` — watch a page/careers site for keywords (e.g. NVIDIA + `intern`) or any change.
-  - `inbox` — recent/unread emails via IMAP (`IMAP_*`).
-  New findings appear in the digest's "What's New" and only NEW items are reported.
-- **Korean practice.** A daily TOPIK lesson (vocab + grammar) at your level; past
-  entries are saved so content never repeats.
+  - `web` — watch a page for keywords or any change.
+  - `inbox` — recent/unread email via IMAP.
+  Only *new* findings are reported.
+- **Korean practice.** A daily TOPIK-aligned lesson (vocab + grammar with example
+  sentences/translations) at your level, with a weekly culture tidbit; reply with
+  a sentence to get it graded. History is saved so content never repeats.
+- **Memory** (the **Memory** tab). A persistent, editable store of long-term
+  facts about you that personalizes every digest. Upload a resume to seed it,
+  add/update/remove via natural language, or edit entries directly. It evolves and
+  tail-compresses over time. Stored in `data/digest/memory.json`.
 
-### Memory (the "Memory" tab)
+All digest data lives under `data/digest/`, fully separate from the resume tool.
 
-A persistent, editable store of long-term context about you that personalizes every
-digest. It grows over time and is fully under your control:
+---
 
-- **Upload a resume** (PDF or text) — durable facts (role, education, skills,
-  projects, achievements) are distilled into individual memories.
-- **Natural language** — "I switched teams to X", "remember I prefer morning
-  deep-work", "forget the bit about Y". An LLM turns it into precise add/update/remove
-  operations on your memory list.
-- **Direct editing** — double-click a memory to edit, click its category to change
-  it, or delete it. Filter by category.
+## ResumeForge (the Resume tab)
 
-Memories are stored in `data/digest/memory.json` and fed to the digest composer as
-long-term context.
+Maps a profile + a job description into a single-page, ATS-friendly LaTeX resume
+using the Jake Gutierrez (`sb2nov`-derived) template.
 
-### Google Calendar (optional, account-switchable)
+- **Input:** a **PDF resume** (uploaded), **plain resume text**, free-form
+  **notes**, or a **profile JSON**. Free text/PDFs are parsed by the LLM into a
+  structured profile (truthfully — no invented employers, titles, dates, or
+  metrics). The parsed profile + raw text are stored, so later runs need only a
+  job description.
+- **Optimization:** the LLM rewrites/reorders/selects content for the target role
+  at `temperature=0`, guided by [`RESUME_MANIFESTO.md`](RESUME_MANIFESTO.md)
+  (auto-injected into the system prompt — edit it to tune the philosophy).
+- **Coverage gaps:** each run returns ranked job requirements it couldn't
+  *truthfully* fit, with importance scores and suggestions. Add the real details
+  (per-gap inputs or `--notes`) and regenerate; gaps shrink each pass.
+- **Rendering:** deterministic template fill + full LaTeX escaping, compiled with
+  `pdflatex` and auto-fit to exactly one page (ATS-safe ladder; never below 10pt).
+- **Manual edits:** click **Edit LaTeX** → **Recompile PDF**, or
+  `python3 generate_resume.py --compile-tex output/resume.tex`.
 
-Add OAuth creds to `.env` (works with any Google account; change these to switch
-accounts — no code change):
-
-```bash
-GOOGLE_CLIENT_ID=...
-GOOGLE_CLIENT_SECRET=...
-GOOGLE_REFRESH_TOKEN=...           # one-time consent (e.g. OAuth Playground)
-GOOGLE_CALENDAR_ID=primary
-GOOGLE_TIMEZONE=America/New_York
-```
-
-### Choosing the model
-
-Both the resume tab and the digest use the Anthropic Messages API via the gateway
-in `.env` (`ANTHROPIC_BASE_URL`), defaulting to `claude-opus-4-8`. Override globally
-with `ANTHROPIC_MODEL`, or per run via the Model dropdown in each tab. (Non-Anthropic
-models like GPT require an OpenAI-compatible endpoint — see notes.)
-
-Data is stored under `data/digest/` (config, updates, schedule, korean history,
-trackers, run state), fully separate from the resume pipeline's files.
-
-## Usage (CLI)
-
-First run with LLM optimization (seed the stored profile, optimize, compile):
+### CLI examples
 
 ```bash
-export ANTHROPIC_API_KEY=sk-ant-...
-python3 generate_resume.py --profile samples/profile.sample.json \
-  --jd-text samples/job_posting.sample.txt --compile
-```
-
-Seed from a PDF or plain-text resume (parsed into a profile by the LLM), with
-optional extra notes given to the optimizer as context:
-
-```bash
+# First run: seed profile, optimize against a job, compile
 python3 generate_resume.py --resume path/to/my_resume.pdf --jd-text job.txt --compile
-python3 generate_resume.py --resume resume.txt --notes "Targeting GPU/CUDA roles" --jd-text job.txt --compile
-```
 
-Future runs (reuse stored profile; supply only the job description):
+# Later runs: reuse stored profile, supply only the job description
+python3 generate_resume.py --jd-text job.txt --compile
 
-```bash
-python3 generate_resume.py --jd-text path/to/job_posting.txt --compile
-python3 generate_resume.py --keywords path/to/keywords.json --compile
-```
+# Close a coverage gap (notes are appended to stored context and reused)
+python3 generate_resume.py --jd-text job.txt --notes "Built a Kubernetes operator with custom CRDs." --compile
 
-Regeneration continues from your **last optimized draft** (not the original
-profile), so prior fixes are preserved. Each run also returns a short AI
-**summary** of what changed.
-
-Close coverage gaps reported by a previous run (notes are appended to your stored
-context and reused on every later run, so gaps shrink each pass):
-
-```bash
-python3 generate_resume.py --jd-text job.txt --notes "Built a Kubernetes operator with kubebuilder + custom CRDs to automate failover." --compile
-```
-
-### Manual LaTeX edits
-
-After generation, you can edit the `.tex` yourself and recompile without re-running the AI:
-
-- **UI:** click **Edit LaTeX**, change the source, then **Recompile PDF**.
-- **CLI:** `python3 generate_resume.py --compile-tex output/resume.tex`
-
-The edited `.tex` and PDF are saved under `output/`. Compile errors include a log tail to help you fix syntax issues.
-
-Deterministic mode (no LLM / no API key):
-
-```bash
-python3 generate_resume.py --jd-text samples/job_posting.sample.txt --deterministic --compile
-```
-
-Emit only the `.tex` (deterministic, no compilation needed):
-
-```bash
-python3 generate_resume.py --keywords samples/keywords.sample.json --deterministic --no-compile
+# Fully offline (no LLM/key): keyword scoring + ordering
+python3 generate_resume.py --jd-text job.txt --deterministic --compile
 ```
 
 Outputs land in `output/resume.tex` and `output/resume.pdf`.
 
-## Input schemas
-
-**Profile** (`--profile`):
-
-```json
-{
-  "contact": { "name": "", "email": "", "phone": "", "linkedin": "", "github": "" },
-  "education": [{ "institution": "", "location": "", "degree": "", "gpa": "", "dates": "" }],
-  "skills": { "Languages": ["..."], "Frameworks": ["..."] },
-  "experience": [{ "company": "", "location": "", "role": "", "dates": "", "bullets": ["..."] }],
-  "projects": [{ "title": "", "tech": ["..."], "dates": "", "bullets": ["..."] }]
-}
-```
-
-Common alternative field names are accepted (e.g. `school`/`university` for
-`institution`, `title`/`position` for `role`, `points`/`highlights` for
-`bullets`, `tech_stack`/`technologies` for `tech`).
-
-Instead of structured JSON you can provide a **PDF resume** (`--resume file.pdf`,
-read via `pdftotext`), **plain text** (`--resume file.txt`), or free-form
-**notes** (`--notes "..."` or `--notes @file`). The LLM parses these into the
-schema above (truthfully, no fabrication) and the raw text is stored as context
-and re-supplied to the optimizer on each run. (Parsing free text/PDF requires the
-LLM; it is not available in `--deterministic` mode.)
-
-**Keywords** (`--keywords`): either a flat list or a weighted object.
-
-```json
-{ "required": ["Python", "AWS"], "preferred": ["Terraform", "Kafka"] }
-```
-
-```json
-["Python", "AWS", "Kubernetes"]
-```
-
-`required` keywords are weighted higher than `preferred` when ranking content.
-
-## How tailoring works
-
-1. Keywords become weighted terms (`required` = 2.0, `preferred` = 1.0).
-2. Each skill and bullet is scored by whole-word keyword matches (partial
-   matches count for half).
-3. Skill categories and the skills within them are re-ordered most-relevant
-   first; bullets are ordered most-relevant first.
-4. If the document spills onto a second page, the lowest-scoring bullets are
-   trimmed (recent role keeps >= 2, older roles/projects keep >= 1) before any
-   font reduction.
-
-## ATS guardrails
-
-Single column, standard section headings, selectable text with
-`\pdfgentounicode=1`, no images/icons/multi-column/header-text, font never below
-10pt, and contact details in the document body.
+---
 
 ## Project layout
 
 ```
-generate_resume.py          CLI entry point
-server.py                   local web server for the liquid-glass UI (stdlib)
-web/                        UI assets (index.html, styles.css, app.js)
-resume_pipeline/
-  core.py                   shared generate() used by CLI and server
-  escaping.py               LaTeX special-char escaping
-  store.py                  profile + context persistence (data/profile.json, data/context.txt)
-  tailor.py                 keyword scoring + ordering/selection
-  template.py               exact template + section renderers + density knobs
-  llm.py                    Anthropic Messages API optimizer (stdlib urllib)
-  compile.py                pdflatex + pdfinfo + one-page shrink ladder
-RESUME_MANIFESTO.md         optimization principles injected into the LLM prompt
-samples/                    example profile, keywords, raw job posting
+server.py                   local web server for the UI (stdlib)
+generate_resume.py          resume CLI entry point
+web/                        UI assets
+  index.html, styles.css, app.js          shared shell + resume tab
+  digest.css, digest.js                   daily digest + memory tabs
+digest_pipeline/            Daily Digest engine (isolated)
+  digest.py                 build/render the digest; provider tiering
+  tasks.py                  weekly/daily nested tasks, triage, due dates
+  memory.py                 evolving, tail-compressing long-term memory
+  korean.py                 TOPIK lessons + graded practice
+  news.py                   headline fetch + interest filtering
+  inbox_commands.py         parse email replies into updates
+  email_send.py             SMTP delivery
+  gcal.py                   optional Google Calendar
+  openai_compat.py          stdlib OpenAI chat client
+  llm.py, store.py, scheduler.py
+resume_pipeline/            Resume engine (isolated)
+  core.py, llm.py, tailor.py, template.py, compile.py, escaping.py, store.py
+tools/                      Windows auto-start + headless sender (self-locating)
+  send_digest.py            headless "send today's digest" (used by Task Scheduler)
+  install_email_task.ps1    register the 07:00 daily email task
+  install_startup_task.ps1  register the at-logon UI server task
+  uninstall_*.ps1           remove the tasks
+  *.vbs, start_digest_server.sh   hidden WSL launchers
+RESUME_MANIFESTO.md         resume optimization principles (injected into prompt)
+samples/                    example profile, keywords, job posting
+data/                       your stored data (gitignored): profile, digest/*
 output/                     generated resume.tex / resume.pdf
-data/profile.json           stored profile (gitignored)
+.env.example                copy to .env and fill in keys
 ```
+
+---
+
+## Troubleshooting
+
+- **No email arrives.** Check `data/digest/send.log`. Confirm `SMTP_*` in `.env`
+  and that the recipient is set in the UI. With Gmail you must use an App Password.
+- **Digest looks "gutted" / plain.** The LLM was unreachable and it fell back to
+  offline mode. Set `OPENAI_API_KEY` and pick a `gpt-*` model.
+- **Port already in use.** Another `server.py` is running. It binds `127.0.0.1:8765`.
+- **Resume won't compile.** Install the `texlive-*` packages above; compile errors
+  include a log tail to help locate the LaTeX issue.
+- **Paste blocked in the editor's webview.** Open the UI in a real browser at
+  http://127.0.0.1:8765.

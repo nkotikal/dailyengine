@@ -22,10 +22,12 @@ _HOUR_RE = re.compile(r"^(1[0-2]|[1-9])$")
 class Task:
     text: str
     important: bool = False
-    subtasks: list = field(default_factory=list)  # list[dict{text, important}]
+    critical: bool = False
+    subtasks: list = field(default_factory=list)  # list[dict{text, important, critical}]
 
     def to_dict(self):
-        return {"text": self.text, "important": self.important, "subtasks": self.subtasks}
+        return {"text": self.text, "important": self.important,
+                "critical": self.critical, "subtasks": self.subtasks}
 
 
 @dataclass
@@ -60,10 +62,12 @@ def _indent_level(line: str) -> int:
 
 
 def _strip_important(text: str):
+    """Return (text, important, critical). ''' (3+) = critical, ' = important."""
     text = text.strip()
-    if text.startswith("'"):
-        return text[1:].strip(), True
-    return text, False
+    n = 0
+    while n < len(text) and text[n] == "'":
+        n += 1
+    return text[n:].strip(), n >= 1, n >= 3
 
 
 def _fmt_time(hour24: int) -> str:
@@ -114,20 +118,21 @@ def parse_schedule(text: str) -> dict:
             last_task = None
             continue
 
-        text_val, important = _strip_important(stripped)
+        text_val, important, critical = _strip_important(stripped)
         if not text_val:
             continue
 
         # A deeper-indented line is a subtask of the most recent task.
         if level >= 2 and last_task is not None:
-            last_task.subtasks.append({"text": text_val, "important": important})
+            last_task.subtasks.append({"text": text_val, "important": important,
+                                       "critical": critical})
             continue
 
         # Otherwise it's a task. Attach to the current hour (or an "unscheduled" block).
         if cur is None:
             cur = Block(hour_label=0, hour24=-1, day_offset=0, time_str="Unscheduled")
             blocks.append(cur)
-        task = Task(text=text_val, important=important)
+        task = Task(text=text_val, important=important, critical=critical)
         cur.tasks.append(task)
         last_task = task
 
@@ -162,8 +167,9 @@ def _events(blocks: list[Block]) -> list:
             for s in t.subtasks:
                 mark = "* " if s.get("important") else "- "
                 desc_lines.append(mark + s["text"])
+            mark = "\u203c\ufe0f " if t.critical else ("\u2605 " if t.important else "")
             events.append({
-                "summary": ("\u2605 " if t.important else "") + t.text,
+                "summary": mark + t.text,
                 "hour24": b.hour24,
                 "minute": 0,
                 "day_offset": b.day_offset,
@@ -182,10 +188,10 @@ def render_text(parsed: dict) -> str:
             continue
         lines.append(f"{b['time_str']}")
         for t in b["tasks"]:
-            star = "\u2605 " if t["important"] else ""
+            star = "\u203c\ufe0f " if t.get("critical") else ("\u2605 " if t["important"] else "")
             lines.append(f"  - {star}{t['text']}")
             for s in t["subtasks"]:
-                sstar = "\u2605 " if s.get("important") else ""
+                sstar = "\u203c\ufe0f " if s.get("critical") else ("\u2605 " if s.get("important") else "")
                 lines.append(f"      \u00b7 {sstar}{s['text']}")
     return "\n".join(lines)
 

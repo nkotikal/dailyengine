@@ -597,8 +597,248 @@ async function deleteVersion(id) {
   } catch (e) { showError("Network error: " + e.message); }
 }
 
+// -- user switcher (per-user compartmentalization) ------------------------
+
+async function loadUsers() {
+  try {
+    const r = await fetch("/api/users");
+    const data = await r.json();
+    if (!data.ok) return;
+    const sel = $("user-select");
+    if (!sel) return;
+    sel.innerHTML = "";
+    (data.users || []).forEach((u) => {
+      const o = document.createElement("option");
+      o.value = u.id;
+      o.textContent = u.name || u.id;
+      if (u.id === data.active) o.selected = true;
+      sel.appendChild(o);
+    });
+    const del = $("user-delete");
+    if (del) del.disabled = (data.users || []).length <= 1;
+  } catch (e) { /* non-fatal */ }
+}
+
+async function switchUser(id) {
+  try {
+    const r = await fetch("/api/users/switch", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id }),
+    });
+    const data = await r.json();
+    if (!data.ok) { alert(data.error || "Could not switch user."); return; }
+    // Reload so every tab repopulates from the newly active user's data.
+    location.reload();
+  } catch (e) { alert("Network error: " + e.message); }
+}
+
+async function addUser() {
+  const name = (prompt("Name for the new user?") || "").trim();
+  if (!name) return;
+  try {
+    const r = await fetch("/api/users/create", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    const data = await r.json();
+    if (!data.ok) { alert(data.error || "Could not create user."); return; }
+    location.reload();  // new user is now active and starts empty/isolated
+  } catch (e) { alert("Network error: " + e.message); }
+}
+
+async function renameUser() {
+  const sel = $("user-select");
+  if (!sel || !sel.value) return;
+  const cur = sel.options[sel.selectedIndex].textContent;
+  const name = (prompt("Rename user:", cur) || "").trim();
+  if (!name || name === cur) return;
+  try {
+    await fetch("/api/users/rename", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: sel.value, name }),
+    });
+    loadUsers();
+  } catch (e) { alert("Network error: " + e.message); }
+}
+
+async function deleteUser() {
+  const sel = $("user-select");
+  if (!sel || !sel.value) return;
+  const cur = sel.options[sel.selectedIndex].textContent;
+  if (!confirm(`Delete user "${cur}" and ALL of their data permanently? This cannot be undone.`)) return;
+  try {
+    const r = await fetch("/api/users/delete", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: sel.value }),
+    });
+    const data = await r.json();
+    if (!data.ok) { alert(data.error || "Could not delete user."); return; }
+    location.reload();
+  } catch (e) { alert("Network error: " + e.message); }
+}
+
+// -- dashboard localization (Korean mode) ----------------------------------
+// Static-shell translation: maps exact English UI strings to Korean and swaps
+// leaf text/placeholders in-place (reversible). Dynamic lists stay in the source
+// language; the emailed report is translated server-side.
+const I18N_KO = {
+  // tabs + sub-tabs
+  "Resume": "이력서", "Daily Digest": "데일리 다이제스트", "Memory": "메모리",
+  "Digest": "다이제스트", "Plan": "계획", "Sources": "소스", "Learning": "학습", "Settings": "설정",
+  // panel titles
+  "About you": "내 정보", "Delivery": "발송 설정", "Schedule → Calendar": "일정 → 캘린더",
+  "Weekly tasks": "주간 작업", "Trackers": "트래커", "Language practice": "언어 연습",
+  "Reminders & deadlines": "리마인더 및 마감일", "Headlines & interests": "헤드라인 및 관심사",
+  "Clear & reset": "초기화 및 리셋", "Updates": "업데이트", "Latest reflection": "최근 회고",
+  "Preview": "미리보기", "Context": "컨텍스트", "Job description": "채용 공고",
+  "Coverage gaps": "부족한 부분", "Saved profile": "저장된 프로필", "Version history": "버전 기록",
+  "Profile — base context": "프로필 — 기본 컨텍스트", "Teach it about you": "나에 대해 알려주기",
+  "Talk to your memory": "메모리와 대화", "What it remembers": "기억하는 내용",
+  // labels
+  "About you / context": "내 정보 / 컨텍스트", "Goals this week": "이번 주 목표",
+  "Long-term goals (with target dates)": "장기 목표 (목표 날짜 포함)",
+  "Recurring / standing tasks": "반복 / 상시 작업", "Send to": "받는 사람",
+  "Interests (comma-separated)": "관심사 (쉼표로 구분)", "Sources": "소스",
+  "Model (primary)": "모델 (기본)", "OpenAI fallback model": "OpenAI 대체 모델",
+  "Send time (local)": "발송 시간 (현지)", "Focus capacity (h/day)": "집중 시간 (시간/일)",
+  "Morning auto-send": "아침 자동 발송", "Offline mode": "오프라인 모드",
+  "Include in digest:": "다이제스트에 포함:", "Language": "언어", "Type": "유형", "Name": "이름",
+  "Korean level / placement": "한국어 레벨 / 배치", "English vocab level": "영어 어휘 레벨",
+  // buttons
+  "Save details": "세부정보 저장", "Add": "추가", "Preview digest": "다이제스트 미리보기",
+  "Send now": "지금 보내기", "Resend with updates": "업데이트 후 재전송", "Parse & save": "분석 및 저장",
+  "Push to Google Calendar": "구글 캘린더에 추가", "Clear completed": "완료 항목 삭제",
+  "Clear all": "모두 삭제", "+ Add task": "+ 작업 추가", "Test": "테스트", "Add tracker": "트래커 추가",
+  "Preview today's lesson": "오늘의 수업 미리보기", "Set placement": "레벨 설정",
+  "Add reminder": "리마인더 추가", "Add source": "소스 추가",
+  "Save interests & sources": "관심사 및 소스 저장", "Process email replies now": "이메일 답장 처리",
+  "Reset ALL content": "모든 콘텐츠 초기화", "Generate resume": "이력서 생성",
+  "Save profile": "프로필 저장", "Apply": "적용", "Add as one memory": "하나의 메모리로 추가",
+  "Consolidate memory now": "메모리 통합", "Add to memory": "메모리에 추가", "Refresh": "새로고침",
+  // clear/reset grid
+  "Daily tasks": "일일 작업", "Weekly goals": "주간 목표", "Long-term goals": "장기 목표",
+  "Schedule": "일정", "Reminders": "리마인더", "Korean progress": "한국어 진행상황",
+  // header controls
+  "+ New": "+ 새 사용자", "Rename": "이름 변경", "Delete": "삭제",
+};
+
+function _translateNode(node, dict) {
+  if (node.children.length === 0) {
+    const cur = node.textContent;
+    const key = cur.trim();
+    if (dict) {
+      if (dict[key] !== undefined) {
+        if (!node.hasAttribute("data-en")) node.setAttribute("data-en", cur);
+        node.textContent = cur.replace(key, dict[key]);
+      }
+    } else if (node.hasAttribute("data-en")) {
+      node.textContent = node.getAttribute("data-en");
+      node.removeAttribute("data-en");
+    }
+  }
+  if ("placeholder" in node && node.placeholder) {
+    const key = node.placeholder.trim();
+    if (dict && dict[key] !== undefined) {
+      if (!node.hasAttribute("data-en-ph")) node.setAttribute("data-en-ph", node.placeholder);
+      node.placeholder = dict[key];
+    } else if (!dict && node.hasAttribute("data-en-ph")) {
+      node.placeholder = node.getAttribute("data-en-ph");
+      node.removeAttribute("data-en-ph");
+    }
+  }
+}
+
+function applyUILang(lang) {
+  const ko = lang === "ko";
+  document.documentElement.setAttribute("lang", ko ? "ko" : "en");
+  const dict = ko ? I18N_KO : null;
+  const shell = document.querySelector("main.shell");
+  if (shell) shell.querySelectorAll("*").forEach((n) => _translateNode(n, dict));
+  const sel = document.getElementById("lang-select");
+  if (sel) sel.value = ko ? "ko" : "en";
+}
+window.applyUILang = applyUILang;
+
+function initLangSwitcher() {
+  const sel = $("lang-select");
+  if (!sel) return;
+  let saved = "en";
+  try { saved = localStorage.getItem("rf-lang") || "en"; } catch (e) {}
+  applyUILang(saved);
+  sel.addEventListener("change", () => {
+    const l = sel.value === "ko" ? "ko" : "en";
+    try { localStorage.setItem("rf-lang", l); } catch (e) {}
+    applyUILang(l);
+    fetch("/api/digest/config", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ui_lang: l }),
+    }).catch(() => {});
+  });
+}
+
+// -- color theme switcher --------------------------------------------------
+
+function initThemeSwitcher() {
+  const sel = $("theme-select");
+  if (!sel) return;
+  let saved = "aurora";
+  try { saved = localStorage.getItem("rf-theme") || "aurora"; } catch (e) {}
+  sel.value = saved;
+  if (saved && saved !== "aurora") {
+    document.documentElement.setAttribute("data-theme", saved);
+  }
+  sel.addEventListener("change", () => {
+    const t = sel.value;
+    if (t && t !== "aurora") {
+      document.documentElement.setAttribute("data-theme", t);
+    } else {
+      document.documentElement.removeAttribute("data-theme");
+    }
+    try { localStorage.setItem("rf-theme", t); } catch (e) {}
+    // Persist per-user so each profile keeps its own theme.
+    fetch("/api/digest/config", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ theme: t }),
+    }).catch(() => {});
+  });
+}
+
+// -- backdrop pattern switcher --------------------------------------------
+
+function initPatternSwitcher() {
+  const sel = $("pattern-select");
+  if (!sel) return;
+  let saved = "moroccan";
+  try { saved = localStorage.getItem("rf-pattern") || "moroccan"; } catch (e) {}
+  sel.value = saved;
+  document.documentElement.setAttribute("data-pattern", saved);
+  sel.addEventListener("change", () => {
+    const p = sel.value || "moroccan";
+    document.documentElement.setAttribute("data-pattern", p);
+    try { localStorage.setItem("rf-pattern", p); } catch (e) {}
+    fetch("/api/digest/config", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pattern: p }),
+    }).catch(() => {});
+  });
+}
+
+function initUserSwitcher() {
+  const sel = $("user-select");
+  if (!sel) return;
+  loadUsers();
+  sel.addEventListener("change", () => switchUser(sel.value));
+  if ($("user-add")) $("user-add").addEventListener("click", addUser);
+  if ($("user-rename")) $("user-rename").addEventListener("click", renameUser);
+  if ($("user-delete")) $("user-delete").addEventListener("click", deleteUser);
+}
+
 function init() {
   loadStatus();
+  initThemeSwitcher();
+  initPatternSwitcher();
+  initLangSwitcher();
+  initUserSwitcher();
   $("profile-toggle").addEventListener("click", toggleProfile);
   $("clear-profile").addEventListener("click", clearProfile);
   $("resume-file").addEventListener("change", onFile);

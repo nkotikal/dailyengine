@@ -29,6 +29,43 @@ def have_key() -> bool:
     return bool(os.environ.get(API_KEY_ENV))
 
 
+# Active provider context: build_digest sets this so every LLM call in a run (compose,
+# korean, memory, replies) uses the same provider/model. ("anthropic" or "openai").
+_ACTIVE = {"provider": "anthropic", "model": None}
+
+
+def set_active(provider: str, model: str | None = None) -> None:
+    _ACTIVE["provider"] = provider if provider in ("anthropic", "openai") else "anthropic"
+    _ACTIVE["model"] = model
+
+
+def openai_configured() -> bool:
+    import openai_compat
+    return openai_compat.configured()
+
+
+def openai_reachable() -> bool:
+    import openai_compat
+    return openai_compat.reachable()
+
+
+def reachable(timeout: int = 4) -> bool:
+    """Cheap check that the LLM gateway host resolves (catches the off-VPN/DNS case
+    that silently degrades the morning digest)."""
+    import socket
+    import urllib.parse
+    base = os.environ.get(BASE_URL_ENV) or DEFAULT_BASE_URL
+    host = urllib.parse.urlparse(base).hostname
+    if not host:
+        return False
+    try:
+        socket.setdefaulttimeout(timeout)
+        socket.getaddrinfo(host, 443)
+        return True
+    except OSError:
+        return False
+
+
 def resolve_model(model: str | None) -> str:
     return model or os.environ.get(MODEL_ENV) or DEFAULT_MODEL
 
@@ -56,9 +93,10 @@ VOICE - A CREATIVE, WARM SECRETARY WRITING A REAL REPORT (not a robot, not a lis
   frame what matters, why, and what to do - then a few bullets where a list helps.
 - Track progress and momentum out loud ("the PR work is basically closed; kernels are
   the next front"). Connect things; add insight, not just status.
-- EMPHASIZE PRIORITY ITEMS: tasks the user marked with a leading apostrophe (') are
-  their declared top priorities - call these out explicitly and make sure they lead
-  Today's Focus. Treat overdue / due-today items as urgent too.
+- EMPHASIZE PRIORITY ITEMS: a leading ' marks a high priority; a leading ''' marks a
+  CRITICAL ("double") priority. Critical items must lead Today's Focus and be clearly
+  emphasized (use priority "critical"); high ones come next. Treat overdue / due-today
+  items as urgent too.
 - Length: a proper morning report, roughly 250-450 words. Substantial enough to feel
   like a briefing, tight enough to read in ~2 minutes. Don't pad; don't be terse to
   the point of cold.
@@ -68,6 +106,11 @@ OUTPUT FORMAT (strict):
   commentary before or after.
 - Schema:
   {
+    "motivation": "a short, GRITTY line for the very top - punchy and a little raw, like "
+                  "a coach before a hard day. No corny clichés or hashtags; earned, real, "
+                  "a bit edgy. If a reflection is provided and the day went poorly or I was "
+                  "blocked/unmotivated, be HONEST and direct about it (tell it like it is, "
+                  "constructively) instead of generic hype. 1-2 sentences, fresh each day.",
     "greeting": "a warm, personal 1-2 sentence opener referencing the day",
     "headline": "one sentence: the single most important thing today",
     "sections": [
@@ -76,7 +119,7 @@ OUTPUT FORMAT (strict):
         "icon": "one emoji that fits the section",
         "summary": "TOP sections: 1-3 sentences of warm, insightful prose that frames "
                    "and interprets. BOTTOM/detail sections: usually \"\" (just a list).",
-        "items": [ {"text": "a concrete line", "priority": "high|medium|low",
+        "items": [ {"text": "a concrete line", "priority": "critical|high|medium|low",
                     "url": "optional link (REQUIRED for headline items)"} ]
       }
     ],
@@ -89,21 +132,29 @@ STRUCTURE - inverted pyramid (what matters up top, granular day at the very bott
   THE BRIEF (top - prose-rich, the heart of the report):
   1. "Today's Focus" - the 2-4 things that move the needle, the single most important
      first. Open with a few sentences; PRIORITY (') tasks must be emphasized here.
-  2. "Deadlines" - overdue / due-soon items and approaching dates. Each: what + when +
-     why it matters. Omit if none.
+  2. "Reminders" - upcoming deadlines: overdue / due-soon items and approaching dates.
+     Each: what + when + why it matters; flag overdue/today as high. DEADLINES MUST
+     NEVER BE DROPPED - include every active reminder, and as a date nears make it more
+     prominent. Omit the section only if there are truly none.
   3. "Headlines" - the 3-5 news items most relevant to my interests, one crisp take
      each. Omit if none.
   4. "What's New" - notable updates/tracker developments, synthesized. Omit if none.
 
   QUICK SITUATIONAL AWARENESS:
-  5. "Progress" - a sentence or two on momentum (e.g. "3/8 weekly tasks done").
+  5. "Progress" - a sentence or two on momentum. NOTE: my weekly top-level entries
+     are CATEGORIES/areas (e.g. "AMD", "Applications"), not individual tasks - never
+     say "0/5 tasks". Speak in terms of concrete tasks completed within areas, or by
+     area (e.g. "AMD is moving - PRs nearly merged; Applications not started yet").
 
   THE DETAIL (bottom - leaner, mostly lists, minimal prose):
   6. "This Week's Tasks" - remaining open tasks not already in Today's Focus.
-  7. "Routine" - standing/recurring tasks.
-  8. "Korean Practice" - if provided; include verbatim. Goes ABOVE the schedule.
-  9. "Schedule" - the full time-blocked day; keep every task/subtask with times.
-     This is the most granular item - it goes DEAD LAST.
+  7. Language practice / vocab - if provided; include verbatim. Goes ABOVE the schedule.
+  8. Schedule - do NOT create your own "Schedule" section; the full time-blocked day
+     is appended automatically from my planner. Instead, pull the important scheduled
+     items up into "Today's Focus". Only if NO schedule was provided (see SCHEDULE
+     STATUS) may you add a light suggested plan labeled "(auto-suggested)"; never
+     fabricate fixed appointments.
+- Do NOT create a "Routine" section.
 
 - Never repeat a Today's Focus item verbatim down in the detail lists.
 - NO INFORMATION LOSS: when a schedule is provided, every task/subtask appears in the
@@ -113,6 +164,10 @@ STRUCTURE - inverted pyramid (what matters up top, granular day at the very bott
   above - preserve the hierarchy (indent subtasks under their parent).
 - Don't fabricate facts, appointments, or numbers not implied by the input.
 - Omit any section with no real input. Keep the warm close to one line.
+
+- Always include "motivation": one fresh, gritty, motivational line that sits at the
+  very top - make it land. Vary it day to day; tie it to the day's actual grind when
+  you can.
 
 Return the digest JSON now."""
 
@@ -163,8 +218,19 @@ def post_json(
     temperature: float = 0.3,
     max_tokens: int = 2048,
     timeout: int = 120,
+    provider: str | None = None,
 ) -> dict:
-    """Generic 'return a JSON object' chat call. Shared by all digest features."""
+    """Generic 'return a JSON object' chat call. Routes to the active provider
+    (Anthropic AMD gateway by default, or OpenAI fallback)."""
+    prov = provider or _ACTIVE.get("provider", "anthropic")
+    if prov == "openai":
+        import openai_compat
+        om = _ACTIVE.get("model") or "gpt-5.4-mini"
+        try:
+            return openai_compat.post_json(system, user, model=om, temperature=temperature,
+                                           max_tokens=max_tokens, timeout=timeout)
+        except openai_compat.OpenAIError as exc:
+            raise DigestLLMError(str(exc)) from exc
     key = os.environ.get(API_KEY_ENV)
     if not key:
         raise DigestLLMError(
@@ -206,15 +272,20 @@ def compose_digest(
     when_human: str,
     tone: str = "friendly and concise",
     memory_text: str = "",
+    profile_base: str = "",
     schedule_text: str = "",
     calendar_text: str = "",
     tracker_findings: list | None = None,
     korean_summary: str = "",
+    language_title: str = "Korean Practice",
     reminders_text: str = "",
     weekly_tasks_text: str = "",
     focus_load_text: str = "",
     headlines_text: str = "",
     interests: list | None = None,
+    reflection_text: str = "",
+    schedule_note: str = "",
+    report_lang: str = "en",
     model: str | None = None,
     timeout: int = 150,
     max_tokens: int = 4096,
@@ -227,10 +298,19 @@ def compose_digest(
     parts = [
         f"DATE: {when_human}",
         f"TONE: {tone}",
+    ]
+    if (report_lang or "en").lower().startswith("ko"):
+        parts.append(
+            "OUTPUT LANGUAGE: Write the ENTIRE digest in natural, fluent Korean - the "
+            "motivation, greeting, headline, every section title and summary, and all "
+            "items. Keep proper nouns, code identifiers, and established English tech "
+            "terms as-is where a Korean reader would expect them. Section titles should "
+            "be their natural Korean equivalents (e.g. '\uc624\ub298\uc758 \uc9d1\uc911', "
+            "'\ub9ac\ub9c8\uc778\ub354', '\ud5e4\ub4dc\ub77c\uc778', '\uc77c\uc815')."
+        )
+    parts += [
         f"ABOUT ME:\n{about.strip() or '(not provided)'}",
         f"MY LONG-TERM GOALS (may include target dates):\n{longterm_goals.strip() or '(not provided)'}",
-        f"MY STANDING / RECURRING TASKS (tab-indented lines are subtasks; keep that "
-        f"nesting):\n{tasks.strip() or '(not provided)'}",
     ]
     if weekly_tasks_text.strip():
         parts.append(
@@ -250,22 +330,45 @@ def compose_digest(
     if focus_load_text.strip():
         parts.append("FOCUS LOAD vs CAPACITY (for headspace; mention briefly, and if "
                      "over capacity gently suggest deferring lower items):\n" + focus_load_text.strip())
+    if profile_base.strip():
+        parts.append(
+            "MY PROFILE (stable base context - who I am, always relevant; use to ground "
+            "everything, don't restate verbatim):\n" + profile_base.strip()
+        )
     if memory_text.strip():
         parts.append(
-            "LONG-TERM MEMORY ABOUT ME (durable context to personalize and inform "
-            "the digest; use where relevant, don't list verbatim):\n" + memory_text.strip()
+            "LONG-TERM MEMORY (evolving notes, most important first; recent work matters "
+            "most; use where relevant, don't list verbatim):\n" + memory_text.strip()
+        )
+    if reflection_text.strip():
+        parts.append(
+            "MY END-OF-DAY REFLECTION FROM YESTERDAY (accomplishments, blockers, mood, "
+            "progress). Use this to make the TOP 'motivation' and 'greeting' honest and "
+            "specific - do NOT create a separate section for it:\n"
+            "- If I was blocked or low on motivation, name it briefly and push me forward "
+            "while keeping it REAL (no corny hype).\n"
+            "- If my progress was poor/thin, tell me straight - like it is, no coddling - "
+            "then point me at the single most important fix today.\n"
+            "- If I did well, acknowledge it crisply and build momentum.\n"
+            + reflection_text.strip()
         )
     if schedule_text.strip():
         parts.append(
-            "TODAY'S PLANNED SCHEDULE (preserve EVERY task and subtask; do not drop "
-            "or merge any item; keep times):\n" + schedule_text.strip()
+            "TODAY'S PLANNED SCHEDULE (FOR CONTEXT ONLY - the Schedule section is "
+            "generated automatically, so do NOT reproduce it; instead surface the "
+            "important scheduled items in 'Today's Focus'):\n" + schedule_text.strip()
+        )
+    elif schedule_note.strip():
+        parts.append(
+            "SCHEDULE STATUS: " + schedule_note.strip()
+            + " If you add a suggested schedule, clearly label it '(auto-suggested)'."
         )
     if calendar_text.strip():
         parts.append("EVENTS FROM MY GOOGLE CALENDAR:\n" + calendar_text.strip())
     if reminders_text.strip():
         parts.append(
             "ACTIVE REMINDERS / DEADLINES (surface ALL of these near the TOP in a "
-            "'Deadlines' section; mark overdue and due-soon items high priority; keep "
+            "'Reminders' section; mark overdue and due-soon items high priority; keep "
             "the dates):\n" + reminders_text.strip()
         )
     parts.append(f"NEW UPDATES SINCE LAST DIGEST:\n{update_lines or '(none)'}")
@@ -273,16 +376,17 @@ def compose_digest(
         parts.append("NEW DEVELOPMENTS FROM MY TRACKERS:\n" + "\n".join(finding_lines))
     if korean_summary.strip():
         parts.append(
-            "TODAY'S KOREAN LESSON (include verbatim as its own section titled "
-            "'Korean Practice'; keep all vocab and grammar):\n" + korean_summary.strip()
+            f"TODAY'S LANGUAGE LESSON (include verbatim as its own section titled "
+            f"'{language_title}'; keep every item):\n" + korean_summary.strip()
         )
     if headlines_text.strip():
         ints = ", ".join(interests or []) or "(none specified)"
         parts.append(
-            "CANDIDATE HEADLINES from my news sources (each line ends with its URL). "
+            "CANDIDATE HEADLINES from my news sources, each prefixed with an index [N]. "
             "In a 'Headlines' section (near the top, after Today's Focus / Deadlines), "
             "pick the 3-5 MOST relevant to my interests; for each item set 'text' to a "
-            "crisp one-line take and set 'url' to that story's exact URL from the list. "
+            "crisp one-line take. CRITICAL: do NOT write a URL - instead set 'url' to the "
+            "story's index in the form 'ref:N' (e.g. 'ref:3'). Never invent links. "
             "Lead with the most relevant; skip the rest. MY INTERESTS: " + ints + "\n"
             + headlines_text.strip()
         )

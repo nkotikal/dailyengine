@@ -36,24 +36,30 @@ object in this schema:
      "example_ko": "...", "example_en": "...", "topik_level": "TOPIK 3"}
   ],
   "grammar": [
-    {"point": "...", "english": "...", "example_ko": "...", "example_en": "...",
-     "topik_level": "TOPIK 3"}
+    {"point": "...", "english": "a clear 1-2 sentence explanation of meaning AND when/how to use it",
+     "form": "how it attaches (e.g. verb stem + -(으)면)", "example_ko": "...",
+     "example_en": "...", "topik_level": "TOPIK 3"}
   ],
   "review": [
     {"type": "vocab|grammar", "item": "...", "prompt": "a short recall cue",
-     "answer": "the meaning / usage", "example_ko": "..."}
+     "answer": "the meaning / usage", "example_ko": "...", "example_en": "..."}
   ],
-  "tip": "one short study tip or nuance note"
+  "tip": "one short study tip or nuance note",
+  "culture": "OPTIONAL - only when asked: 2-3 sentences on Korean culture/history/a current note"
 }
 
 RULES:
-- Teach EXACTLY the provided new vocab and grammar (same Korean items). Add accurate
-  romanization (Revised Romanization), natural example sentences, and correct English.
-- For REVIEW items, write a brief recall prompt and the answer so the learner can
-  self-test, plus a fresh example sentence.
+- Teach EXACTLY the provided new vocab and grammar (same Korean items). These are REAL
+  TOPIK grammar points - explain each accurately; never invent fake grammar or words.
+- EVERY example sentence (vocab, grammar, AND review) MUST include both the Korean
+  (example_ko) and a correct natural English translation (example_en).
+- Grammar "english" should genuinely teach: what it means and when to use it (1-2
+  sentences), and "form" shows how it attaches. Be clear and beginner-friendly but precise.
+- Add accurate Revised-Romanization and natural, correct example sentences.
 - If asked to supply EXTRA vocab, add that many useful TOPIK II words NOT in the
   do-not-repeat list.
-- Keep everything correct and natural; do not invent fake words."""
+- If asked for a CULTURE note, fill "culture" with a short, genuinely interesting
+  Korean culture/history/current-events tidbit (otherwise omit it)."""
 
 
 def _today():
@@ -108,7 +114,7 @@ def select_items(state: dict, level: str, today: str | None = None) -> dict:
     }
 
 
-def _build_user_message(sel: dict, state: dict, level: str) -> str:
+def _build_user_message(sel: dict, state: dict, level: str, want_culture: bool = False) -> str:
     ng = "\n".join(f"- {g['point']}  ({g['english']}; {g['level']})" for g in sel["new_grammar"]) or "(none)"
     nv = "\n".join(f"- {v['korean']}  ({v['english']}; {v['pos']})" for v in sel["new_vocab"]) or "(none)"
     rv = "\n".join(
@@ -116,13 +122,15 @@ def _build_user_message(sel: dict, state: dict, level: str) -> str:
     ) or "(none)"
     extra = (f"\n\nALSO SUPPLY {sel['need_extra_vocab']} EXTRA TOPIK II vocab words "
              f"(the ordered deck is exhausted)." if sel["need_extra_vocab"] else "")
+    culture = ("\n\nIt's SUNDAY: also fill the \"culture\" field with a short, genuinely "
+               "interesting Korean culture/history/current-events tidbit." if want_culture else "")
     dnr_v = ", ".join(state.get("seen_vocab", [])[-300:])
     return (
         f"LEVEL: {level}\n\n"
-        f"NEW GRAMMAR TO TEACH:\n{ng}\n\n"
+        f"NEW GRAMMAR TO TEACH (real TOPIK points - explain clearly with form + translation):\n{ng}\n\n"
         f"NEW VOCAB TO TEACH:\n{nv}\n\n"
-        f"ITEMS TO REVIEW (write recall prompt + answer + example):\n{rv}"
-        f"{extra}\n\n"
+        f"ITEMS TO REVIEW (recall prompt + answer + example with translation):\n{rv}"
+        f"{extra}{culture}\n\n"
         f"DO-NOT-REPEAT VOCAB (for any extra words):\n{dnr_v}"
     )
 
@@ -209,11 +217,12 @@ def build_lesson(state: dict, *, level: str = "intermediate", today: str | None 
     today = today or _today()
     sel = select_items(state, level, today)
 
+    want_culture = datetime.strptime(today, "%Y-%m-%d").weekday() == 6  # Sunday
     if offline:
         lesson = _offline_lesson(sel)
     else:
-        data = llm.post_json(SYSTEM_PROMPT, _build_user_message(sel, state, level),
-                             model=model, temperature=0.6, max_tokens=2600, timeout=120)
+        data = llm.post_json(SYSTEM_PROMPT, _build_user_message(sel, state, level, want_culture),
+                             model=model, temperature=0.6, max_tokens=2800, timeout=120)
         lesson = _normalize(data)
         # Safety net: if the model dropped the required new items, fall back for those.
         if not lesson.get("vocab") and not lesson.get("grammar"):
@@ -235,7 +244,7 @@ def _normalize(data: dict) -> dict:
         if not isinstance(g, dict) or not g.get("point"):
             continue
         grammar.append({k: str(g.get(k, "")).strip() for k in
-                        ("point", "english", "example_ko", "example_en", "topik_level")})
+                        ("point", "english", "form", "example_ko", "example_en", "topik_level")})
     for r in (data.get("review") or []):
         if not isinstance(r, dict):
             continue
@@ -245,9 +254,45 @@ def _normalize(data: dict) -> dict:
             "prompt": str(r.get("prompt", "")).strip(),
             "answer": str(r.get("answer", "")).strip(),
             "example_ko": str(r.get("example_ko", "")).strip(),
+            "example_en": str(r.get("example_en", "")).strip(),
         })
     return {"vocab": vocab, "grammar": grammar, "review": review,
-            "tip": str(data.get("tip", "")).strip()}
+            "tip": str(data.get("tip", "")).strip(),
+            "culture": str(data.get("culture", "")).strip()}
+
+
+GRADE_SYSTEM = """\
+You are a supportive Korean tutor grading a learner's practice sentences. They were
+practicing today's vocabulary. For each sentence, respond with ONLY a JSON object:
+
+{ "results": [ {"sentence": "what they wrote", "score": 0-100,
+                "corrected": "a corrected/natural version (or same if already good)",
+                "feedback": "1-2 sentences: what's right, what to fix, why"} ] }
+
+Be encouraging and specific. Judge grammar, naturalness, and word use. If a sentence
+is already good, say so and score high."""
+
+
+def grade_practice(sentences: list, *, vocab_context: str = "", model: str | None = None) -> list:
+    """Grade learner-submitted practice sentences. Returns list of result dicts."""
+    sents = [s for s in (sentences or []) if str(s).strip()]
+    if not sents:
+        return []
+    user = ("TODAY'S VOCAB (context):\n" + (vocab_context or "(n/a)") + "\n\n"
+            "MY PRACTICE SENTENCES:\n" + "\n".join(f"- {s}" for s in sents))
+    data = llm.post_json(GRADE_SYSTEM, user, model=model, temperature=0.3, max_tokens=1500)
+    out = []
+    for r in (data.get("results") or []):
+        if isinstance(r, dict) and r.get("sentence"):
+            try:
+                score = int(round(float(r.get("score", 0))))
+            except (TypeError, ValueError):
+                score = 0
+            out.append({"sentence": str(r["sentence"]).strip(),
+                        "score": max(0, min(100, score)),
+                        "corrected": str(r.get("corrected", "")).strip(),
+                        "feedback": str(r.get("feedback", "")).strip()})
+    return out
 
 
 def render_summary(lesson: dict) -> str:

@@ -12,7 +12,9 @@ import os
 import re
 from email.header import decode_header
 
-from . import llm, store, tasks
+from datetime import datetime, timedelta
+
+from . import korean, llm, memory, schedule, store, tasks
 
 
 def _imap_cfg():
@@ -119,25 +121,54 @@ def fetch_replies(recipient: str) -> list:
 
 
 PARSE_SYSTEM = """\
-You convert a person's email reply into structured updates for their daily-digest
-app. Respond with ONLY a JSON object:
+You convert a person's free-form email reply (often an END-OF-DAY reflection) into
+structured updates for their daily-digest app. Capture EVERYTHING meaningful - no
+detail may be lost, especially deadlines - while staying precise. Respond with ONLY
+a JSON object:
 
 {
   "complete": ["text of a task/subtask they say is done"],
-  "add_tasks": [{"text": "...", "priority": "high|medium|low", "due": "YYYY-MM-DD or ''",
+  "accomplished": ["short factual statement of something they got done today"],
+  "add_tasks": [{"text": "...", "priority": "critical|high|medium|low", "due": "YYYY-MM-DD or ''",
                  "parent": "optional: text of the task to nest this under"}],
+  "reminders": [{"text": "a deadline/commitment", "due": "YYYY-MM-DD", "priority": "high|medium|low"}],
+  "blockers": [{"type": "time|blocked|motivation|scope|health|other", "text": "what is holding them back"}],
+  "mood": "great|good|ok|rough|bad or ''",
+  "progress_quality": "strong|solid|mixed|thin|poor or ''",
+  "whats_next": ["short statement of what they plan to do next"],
+  "weekly_targets": ["a target/goal line for the rest of this week"],
+  "schedule_for_tomorrow": "OPTIONAL planner-format text for tomorrow (see FORMAT) - ONLY if they described how they want to block/spend tomorrow",
   "add_interests": ["topic"],
   "remove_interests": ["topic"],
   "preferences": {"korean_enabled": true/false, "news_enabled": true/false,
                   "daily_capacity_hours": number, "send_time": "HH:MM"},
+  "korean_practice": ["a Korean practice sentence the user wrote to be graded"],
   "note": "one short sentence summarizing what you applied"
 }
 
 RULES:
 - Only include keys the reply actually implies; omit the rest. Empty {}/[] are fine.
-- "complete": match the user's wording to their existing tasks (provided below).
-- Interests shape which news headlines they see and topics emphasized over time.
-- Never invent tasks/preferences they didn't mention."""
+- DEADLINES ARE CRITICAL: any due date, presentation, submission, or commitment with a
+  time ("mid-internship presentation due next Friday") MUST go in "reminders" with an
+  absolute "due" date. Resolve relative dates ("next Friday", "in two weeks", "by end
+  of month") to YYYY-MM-DD using TODAY'S DATE given below. Never drop a deadline.
+- "complete": match the user's wording to their existing tasks (listed below).
+- "accomplished": what they did today (feeds "What's New" and long-term memory).
+- "blockers": things impeding them (e.g. "lacking time", "blocked by xyz conflict",
+  "lacking motivation"). Capture the type and a short description.
+- "mood"/"progress_quality": your honest read of how the day went from their words.
+- "weekly_targets": if they describe how they want to spend the coming days
+  ("Friday focus on neuromorphic lab, Saturday finish compiler project"), turn each
+  into a concise target line (include the day). These update the Weekly goals.
+- "schedule_for_tomorrow": if (and only if) they described how to block TOMORROW,
+  synthesize a planner-format schedule from their intent plus their open tasks.
+- "korean_practice": ONLY Korean sentences the user explicitly wrote as practice.
+- Never invent tasks, deadlines, or preferences they didn't mention.
+
+PLANNER FORMAT (for schedule_for_tomorrow): a bare hour number on its own line is an
+hour marker (9 = 9 AM, 12 = noon, 1 = 1 PM...). Lines indented one tab under an hour
+are tasks; two tabs are subtasks. A leading ' marks important, ''' marks critical.
+Example: "9\\n\\t'Deep work: compiler\\n12\\n\\tLunch\\n1\\n\\tNeuromorphic lab"."""
 
 
 def _open_task_texts() -> str:
@@ -177,9 +208,11 @@ def _find_node_id_by_text(phrase: str):
     return best if best_score > 0 else None
 
 
-def _apply(actions: dict) -> dict:
-    applied = {"completed": 0, "added": 0, "interests_added": 0,
-               "interests_removed": 0, "prefs": 0}
+def _apply(actions: dict, *, model: str | None = None) -> dict:
+    applied = {"completed": 0, "added": 0, "reminders": 0, "accomplished": 0,
+               "interests_added": 0, "interests_removed": 0, "prefs": 0,
+               "reflection": False, "schedule_tomorrow": False, "weekly_targets": 0,
+               "memory": {"added": 0, "updated": 0}}
     for phrase in actions.get("complete") or []:
         nid = _find_node_id_by_text(phrase)
         if nid and store.update_node(nid, {"done": True}):
@@ -196,6 +229,65 @@ def _apply(actions: dict) -> dict:
                                   due=t.get("due", ""),
                                   est_minutes=tasks.parse_est(t.get("est_minutes", 0)))
         applied["added"] += 1
+
+    # Deadlines: never dropped. Each becomes a dated reminder that escalates as it nears.
+    for rem in actions.get("reminders") or []:
+        if not isinstance(rem, dict) or not rem.get("text"):
+            continue
+        pr = rem.get("priority", "medium")
+        pr = pr if pr in ("low", "medium", "high") else "medium"
+        store.add_reminder(rem["text"], due=(rem.get("due") or "").strip(), priority=pr)
+        applied["reminders"] += 1
+
+    # Accomplishments -> "What's New" updates (folded into memory below too).
+    accomplished = [str(a).strip() for a in (actions.get("accomplished") or []) if str(a).strip()]
+    for a in accomplished:
+        try:
+            store.add_update(a)
+            applied["accomplished"] += 1
+        except ValueError:
+            pass
+
+    # Weekly targets / time-blocking for coming days -> merge into Weekly goals
+    # (kept in the existing section to minimize clutter).
+    targets = [str(x).strip() for x in (actions.get("weekly_targets") or []) if str(x).strip()]
+    if targets:
+        store.merge_weekly_goals(targets)
+        applied["weekly_targets"] = len(targets)
+
+    # A dynamically generated plan for tomorrow (dated so the morning digest knows
+    # it's a fresh, for-today schedule when tomorrow arrives).
+    sched_text = (actions.get("schedule_for_tomorrow") or "").strip()
+    if sched_text:
+        try:
+            parsed = schedule.parse_schedule(sched_text)
+            if parsed.get("blocks"):
+                tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+                store.save_schedule(sched_text, parsed, for_date=tomorrow)
+                applied["schedule_tomorrow"] = True
+        except Exception:  # noqa: BLE001 - never let a bad plan break processing
+            pass
+
+    # End-of-day reflection (blockers / mood / progress) -> feeds next morning.
+    blockers = [b for b in (actions.get("blockers") or []) if isinstance(b, dict) and b.get("text")]
+    whats_next = [str(x).strip() for x in (actions.get("whats_next") or []) if str(x).strip()]
+    mood = str(actions.get("mood") or "").strip()
+    progress_quality = str(actions.get("progress_quality") or "").strip()
+    if accomplished or blockers or whats_next or mood or progress_quality:
+        reflection = {
+            "accomplished": accomplished, "blockers": blockers,
+            "whats_next": whats_next, "mood": mood,
+            "progress_quality": progress_quality,
+        }
+        store.save_reflection(reflection)
+        applied["reflection"] = True
+        # Robustly fold durable parts of the reflection into long-term memory.
+        try:
+            mem = memory.incorporate_reflection(reflection, model=model)
+            applied["memory"] = mem.get("applied", applied["memory"])
+        except llm.DigestLLMError:
+            pass
+
     if actions.get("add_interests"):
         store.add_interests(actions["add_interests"])
         applied["interests_added"] += len(actions["add_interests"])
@@ -218,6 +310,20 @@ def _apply(actions: dict) -> dict:
     if allowed:
         store.save_config(allowed)
         applied["prefs"] = len(allowed)
+    # Grade any Korean practice sentences and store for today's card.
+    practice = [s for s in (actions.get("korean_practice") or []) if str(s).strip()]
+    if practice:
+        today = datetime.now().strftime("%Y-%m-%d")
+        lesson = store.korean_lesson_for(today) or {}
+        vocab_ctx = ", ".join(f"{v.get('korean','')} ({v.get('english','')})"
+                              for v in lesson.get("vocab", []))
+        try:
+            results = korean.grade_practice(practice, vocab_context=vocab_ctx)
+            if results:
+                store.save_korean_practice(today, results)
+                applied["korean_graded"] = len(results)
+        except llm.DigestLLMError:
+            pass
     return applied
 
 
@@ -234,16 +340,31 @@ def process_replies(*, model: str | None = None) -> dict:
 
     results = []
     open_texts = _open_task_texts()
+    today = datetime.now().strftime("%Y-%m-%d")
+    weekday = datetime.now().strftime("%A")
+    processed = 0
+    deferred = False
     for r in replies:
         try:
             actions = llm.post_json(
                 PARSE_SYSTEM,
-                f"CURRENT OPEN TASKS:\n{open_texts}\n\nMY REPLY:\n{r['body']}",
-                model=model, temperature=0, max_tokens=1500)
-            applied = _apply(actions)
-            results.append({"note": str(actions.get("note") or "").strip(), "applied": applied})
+                f"TODAY'S DATE: {today} ({weekday}). Resolve all relative dates to "
+                f"absolute YYYY-MM-DD from this.\n\nCURRENT OPEN TASKS:\n{open_texts}\n\n"
+                f"MY REPLY:\n{r['body']}",
+                model=model, temperature=0, max_tokens=2000)
         except llm.DigestLLMError as exc:
-            results.append({"error": str(exc)})
-        finally:
-            store.mark_reply_processed(r["mid"])
-    return {"processed": len(replies), "applied": results}
+            # Provider down: DON'T mark processed (so the reply is retried once AI is
+            # back) and DON'T lose it. Note the deferral for the digest to surface.
+            deferred = True
+            results.append({"error": str(exc), "deferred": True})
+            break
+        applied = _apply(actions, model=model)
+        results.append({"note": str(actions.get("note") or "").strip(), "applied": applied})
+        store.mark_reply_processed(r["mid"])
+        processed += 1
+
+    if deferred:
+        store.save_state({"replies_deferred_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
+    elif processed:
+        store.save_state({"replies_deferred_at": ""})
+    return {"processed": processed, "deferred": deferred, "applied": results}
