@@ -1012,10 +1012,20 @@
       showError("Add a recipient email address first.");
       return;
     }
-    await saveConfig(true);
     const btn = $("d-send");
     setBusy(btn, true, "Send now");
     try {
+      // Persist the schedule you may have just typed so it's in the sent digest.
+      const raw = $("d-schedule") ? $("d-schedule").value : "";
+      if (raw && raw.trim()) {
+        const sr = await fetch("/api/digest/schedule", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ raw }),
+        });
+        const sd = await sr.json();
+        if (sd.ok && sd.parsed) renderParsed(sd.parsed);
+      }
+      await saveConfig(true);
       const r = await fetch("/api/digest/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1032,46 +1042,6 @@
       showError("Network error: " + e.message);
     } finally {
       setBusy(btn, false, "Send now");
-    }
-  }
-
-  // Resend: save the current schedule (in case you just added/edited it) and
-  // settings, then rebuild and re-email today's digest with the updated info.
-  async function resendNow() {
-    showError("");
-    if (!$("d-email-to").value.trim()) {
-      showError("Add a recipient email address first.");
-      return;
-    }
-    const btn = $("d-resend");
-    setBusy(btn, true, "Resend with updates");
-    try {
-      const raw = $("d-schedule").value;
-      if (raw && raw.trim()) {
-        const sr = await fetch("/api/digest/schedule", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ raw }),
-        });
-        const sd = await sr.json();
-        if (sd.ok && sd.parsed) renderParsed(sd.parsed);
-      }
-      await saveConfig(true);
-      const r = await fetch("/api/digest/send", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ config: collectConfig() }),
-      });
-      const data = await r.json();
-      if (!data.ok) { showError(data.error || "Resend failed."); return; }
-      const st = $("d-save-status");
-      st.textContent = `Resent to ${data.sent_to}`;
-      setTimeout(() => { st.textContent = ""; }, 3000);
-      if (data.warning) showError(data.warning);
-      loadStatus();
-    } catch (e) {
-      showError("Network error: " + e.message);
-    } finally {
-      setBusy(btn, false, "Resend with updates");
     }
   }
 
@@ -1325,7 +1295,6 @@
     });
     $("d-preview").addEventListener("click", preview);
     $("d-send").addEventListener("click", sendNow);
-    $("d-resend").addEventListener("click", resendNow);
     // persist toggles immediately so the scheduler reflects them
     $("d-enabled").addEventListener("change", () => saveConfig(true));
     $("d-offline").addEventListener("change", () => saveConfig(true));

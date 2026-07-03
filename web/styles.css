@@ -91,6 +91,16 @@ html[data-theme="crimson"] {
   --blob-1: #ff2b3d; --blob-2: #b3121f; --blob-3: #7a0f16; --blob-4: #ff5a4d;
 }
 
+/* Jubilee - deep, saturated warm-red maroon */
+html[data-theme="jubilee"] {
+  --accent: #ee2f36; --accent-2: #ff6a52;
+  --accent-soft: rgba(238,47,54,0.24); --accent-brd: rgba(238,47,54,0.55);
+  --accent-glow: rgba(238,47,54,0.55);
+  --glass-brd: rgba(255,110,90,0.24);
+  --bg-gradient: radial-gradient(140% 120% at 15% 10%, #4a151d 0%, #360f16 45%, #23090e 100%);
+  --blob-1: #ff2130; --blob-2: #ff5a34; --blob-3: #c1121f; --blob-4: #ff7a3d;
+}
+
 /* Graphite - professional, serious, low-distraction */
 html[data-theme="graphite"] {
   --accent: #9fb3c8; --accent-2: #c3cfdb;
@@ -149,8 +159,18 @@ body {
 /* ---------- backdrop: a crisp, subtle geometric pattern + faint color wash ---------- */
 .backdrop {
   position: fixed; inset: 0; z-index: 0; overflow: hidden;
+  /* Gradient lives on the FIXED layer so it's always viewport-mapped (no band
+     from the document being taller than the screen). */
+  background: var(--bg-gradient);
+}
+/* The pattern lives on its own layer so its glow never touches the blobs
+   (whose clipped corners otherwise cast a hard rectangular shadow). */
+.backdrop::before {
+  content: ""; position: absolute; inset: 0;
   background-image: radial-gradient(var(--pattern) 1.4px, transparent 1.6px);
   background-size: 22px 22px;   /* clean default fallback */
+  /* accent-colored glow around the geometric pattern (all themes) */
+  filter: drop-shadow(0 0 2px var(--accent-glow)) drop-shadow(0 0 6px var(--accent-glow));
 }
 .blob {
   position: absolute;
@@ -169,14 +189,14 @@ body {
    A lean, DISTINCT set. Ornate + true-fractal designs use SVG tiles painted through
    a CSS mask so they stay subtle and recolor with the theme (var(--pattern)). */
 
-html[data-pattern="none"] .backdrop { background-image: none; }
+html[data-pattern="none"] .backdrop::before { background-image: none; filter: none; }
 
 /* --- simple --- */
-html[data-pattern="dots"] .backdrop {
+html[data-pattern="dots"] .backdrop::before {
   background-image: radial-gradient(var(--pattern) 1.4px, transparent 1.6px);
   background-size: 22px 22px;
 }
-html[data-pattern="grid"] .backdrop {
+html[data-pattern="grid"] .backdrop::before {
   background-image:
     linear-gradient(var(--pattern) 1px, transparent 1px),
     linear-gradient(90deg, var(--pattern) 1px, transparent 1px);
@@ -185,7 +205,7 @@ html[data-pattern="grid"] .backdrop {
 
 /* --- ornate --- */
 /* Moroccan: interlocking-circle quatrefoil lattice (kept per request) */
-html[data-pattern="moroccan"] .backdrop {
+html[data-pattern="moroccan"] .backdrop::before {
   background-image:
     radial-gradient(circle at 50% 0%, transparent 63%, var(--pattern) 64% 66%, transparent 67%),
     radial-gradient(circle at 0% 50%, transparent 63%, var(--pattern) 64% 66%, transparent 67%),
@@ -195,7 +215,7 @@ html[data-pattern="moroccan"] .backdrop {
   background-size: 48px 48px;
 }
 /* Isometric cubes (true 3D lattice) */
-html[data-pattern="isometric"] .backdrop {
+html[data-pattern="isometric"] .backdrop::before {
   background-image:
     linear-gradient(30deg, var(--pattern) 12%, transparent 12.5%, transparent 87%, var(--pattern) 87.5%, var(--pattern)),
     linear-gradient(150deg, var(--pattern) 12%, transparent 12.5%, transparent 87%, var(--pattern) 87.5%, var(--pattern)),
@@ -207,7 +227,7 @@ html[data-pattern="isometric"] .backdrop {
   background-position: 0 0, 0 0, 21px 37px, 21px 37px, 0 0, 21px 37px;
 }
 /* Arabesque: 8-point Islamic star lattice (SVG through a mask) */
-html[data-pattern="arabesque"] .backdrop {
+html[data-pattern="arabesque"] .backdrop::before {
   background-image: none;
   background-color: var(--pattern);
   -webkit-mask-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='64' height='64' viewBox='0 0 64 64'><g fill='none' stroke='black' stroke-width='1.5'><rect x='14' y='14' width='36' height='36'/><rect x='14' y='14' width='36' height='36' transform='rotate(45 32 32)'/><circle cx='32' cy='32' r='6'/></g></svg>");
@@ -216,7 +236,7 @@ html[data-pattern="arabesque"] .backdrop {
   -webkit-mask-repeat: repeat; mask-repeat: repeat;
 }
 /* Flower of Life: hex-packed overlapping circles (radius = spacing => petals) */
-html[data-pattern="weave"] .backdrop {
+html[data-pattern="weave"] .backdrop::before {
   background-image: none;
   background-color: var(--pattern);
   -webkit-mask-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='32' height='55' viewBox='0 0 32 55'><g fill='none' stroke='black' stroke-width='1.1'><circle cx='0' cy='0' r='32'/><circle cx='32' cy='0' r='32'/><circle cx='0' cy='55' r='32'/><circle cx='32' cy='55' r='32'/><circle cx='16' cy='27.5' r='32'/><circle cx='-16' cy='27.5' r='32'/><circle cx='48' cy='27.5' r='32'/><circle cx='16' cy='-27.5' r='32'/><circle cx='16' cy='82.5' r='32'/></g></svg>");
@@ -227,7 +247,7 @@ html[data-pattern="weave"] .backdrop {
 
 /* --- fractal (real, via SVG) --- */
 /* Sierpinski gasket - nested triangles (depth 2), unmistakably fractal */
-html[data-pattern="sierpinski"] .backdrop {
+html[data-pattern="sierpinski"] .backdrop::before {
   background-image: none;
   background-color: var(--pattern);
   -webkit-mask-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='106' viewBox='0 0 120 106'><polygon points='2,104 60,2 118,104' fill='none' stroke='black' stroke-width='1.3'/><g fill='black'><polygon points='60,104 31,53 89,53'/><polygon points='31,104 45.5,78.5 16.5,78.5'/><polygon points='89,104 103.5,78.5 74.5,78.5'/><polygon points='60,53 74.5,27.5 45.5,27.5'/></g></svg>");
@@ -236,7 +256,7 @@ html[data-pattern="sierpinski"] .backdrop {
   -webkit-mask-repeat: repeat; mask-repeat: repeat;
 }
 /* Nested hexagrams - self-similar star fractal (SVG mask) */
-html[data-pattern="hexstar"] .backdrop {
+html[data-pattern="hexstar"] .backdrop::before {
   background-image: none;
   background-color: var(--pattern);
   -webkit-mask-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='72' height='72' viewBox='0 0 72 72'><g fill='none' stroke='black' stroke-width='1.4'><polygon points='36,6 63,54 9,54'/><polygon points='36,66 9,18 63,18'/><polygon points='36,24 51,48 21,48'/><polygon points='36,48 21,24 51,24'/></g></svg>");
@@ -246,13 +266,13 @@ html[data-pattern="hexstar"] .backdrop {
 }
 
 /* --- glow + mixes (reuse the colored blobs) --- */
-html[data-pattern="aurora"] .backdrop { background-image: none; }
+html[data-pattern="aurora"] .backdrop::before { background-image: none; filter: none; }
 html[data-pattern="aurora"] .blob { opacity: 0.5; filter: blur(78px); animation: drift 32s ease-in-out infinite; }
 html[data-pattern="aurora"] .blob-2 { animation-delay: -8s; }
 html[data-pattern="aurora"] .blob-3 { animation-delay: -16s; }
 html[data-pattern="aurora"] .blob-4 { animation-delay: -24s; }
 
-html[data-pattern="nebula"] .backdrop {
+html[data-pattern="nebula"] .backdrop::before {
   background-image:
     linear-gradient(var(--pattern-2) 1px, transparent 1px),
     linear-gradient(90deg, var(--pattern-2) 1px, transparent 1px);
