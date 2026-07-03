@@ -22,8 +22,8 @@
   --warn: #ffd479;
   --danger: #ff8f9c;
   --shadow: 0 8px 24px rgba(8, 10, 30, 0.34);
-  --pattern: rgba(255, 255, 255, 0.07);   /* backdrop shape pattern */
-  --pattern-2: rgba(255, 255, 255, 0.04);
+  --pattern: rgba(255, 255, 255, 0.14);   /* backdrop shape pattern (drop-shadow glow scales with this) */
+  --pattern-2: rgba(255, 255, 255, 0.08);
   --bg-gradient: radial-gradient(140% 120% at 15% 10%, #2a2350 0%, #181a36 42%, #0c0d1c 100%);
   --blob-1: #6b7bff;
   --blob-2: #c569ff;
@@ -136,8 +136,8 @@ html[data-theme="daylight"] {
   --accent-soft: rgba(79,107,237,0.16); --accent-brd: rgba(79,107,237,0.40);
   --accent-glow: rgba(79,107,237,0.30);
   --shadow: 0 18px 50px rgba(40, 60, 120, 0.18);
-  --pattern: rgba(30, 41, 64, 0.09);
-  --pattern-2: rgba(30, 41, 64, 0.05);
+  --pattern: rgba(30, 41, 64, 0.16);
+  --pattern-2: rgba(30, 41, 64, 0.09);
   --bg-gradient: radial-gradient(140% 120% at 15% 10%, #eef1fb 0%, #e6ecf8 45%, #dde5f3 100%);
   --blob-1: #9db4ff; --blob-2: #d9b3ff; --blob-3: #a7ead9; --blob-4: #ffc6dd;
 }
@@ -169,8 +169,10 @@ body {
   content: ""; position: absolute; inset: 0;
   background-image: radial-gradient(var(--pattern) 1.4px, transparent 1.6px);
   background-size: 22px 22px;   /* clean default fallback */
-  /* accent-colored glow around the geometric pattern (all themes) */
-  filter: drop-shadow(0 0 2px var(--accent-glow)) drop-shadow(0 0 6px var(--accent-glow));
+  /* accent-colored glow around the geometric pattern (all themes). The solid
+     accent inner shadow makes the halo actually visible (drop-shadow strength is
+     capped by the pattern's own alpha). */
+  filter: drop-shadow(0 0 2px var(--accent)) drop-shadow(0 0 6px var(--accent-glow));
 }
 .blob {
   position: absolute;

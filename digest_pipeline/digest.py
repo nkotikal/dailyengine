@@ -434,7 +434,12 @@ def build_digest(cfg: dict | None = None, *, when: datetime | None = None,
     # Choose the LLM provider for this whole run BEFORE any side effects (so a defer
     # consumes nothing). May raise SendDeferred for scheduled sends.
     chosen = _choose_llm(cfg, when, allow_defer=allow_defer)
-    llm.set_active("openai" if chosen == "openai" else "anthropic", cfg.get("openai_model"))
+    # Use the model that matches the chosen provider (OpenAI model for OpenAI,
+    # the Anthropic model for the gateway) - never cross them.
+    if chosen == "openai":
+        llm.set_active("openai", cfg.get("openai_model"))
+    else:
+        llm.set_active("anthropic", cfg.get("model") or None)
     offline = (chosen == "offline")
 
     # On a real send with a working LLM: apply email replies first (reflections,

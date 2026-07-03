@@ -1,78 +1,82 @@
-# Daily Digest + ResumeForge
+# Daily Digest
 
-One small local web app (Python **standard library only** — no `pip`) with two tools you switch between via tabs:
+**A local app that sends you a morning email with your schedule, tasks, deadlines, and updates — and lets you manage it all by replying.**
 
-- **Daily Digest** — tell it your goals, schedule, and tasks; every morning it emails you a clean, sectioned briefing. You can run it entirely **by replying to the email**.
-- **ResumeForge** — turns your profile + a job description into a one-page, ATS-friendly LaTeX resume.
+Daily Digest pulls together your goals, schedule, tasks, project trackers, and optional language practice into one email each morning. Reply to that email in plain English to log progress, add tasks, note blockers, or update your plan — and the next brief reflects those changes.
 
-Runs on **Windows + WSL (Ubuntu)** or plain Linux/macOS. All data is plain JSON under `data/` (no database).
+It also includes **ResumeForge**, a tool that takes your background and a job posting and produces a one-page, ATS-ready resume.
 
-## Setup (~5 min)
+Runs locally on your machine. No accounts, no cloud, no database — just your keys in a `.env` file and your data stored as plain files.
+
+---
+
+## What it does
+
+- **One morning email.** Today's focus, a time-blocked schedule, upcoming deadlines, tracker updates, and news filtered to your interests — in a single, easy-to-scan message.
+- **Reply to update.** No need to open the dashboard for routine changes. Write things like *"done: shipped the API docs," "add task: budget review, due Friday," "blocked on the vendor call"* and tomorrow's brief picks them up.
+- **Persistent memory.** Stores your role, projects, and preferences over time so briefs stay relevant; older detail is compressed as it ages out.
+- **Per-user isolation.** Multiple people can each have a fully separate setup on the same machine.
+
+## Get started (~5 minutes)
 
 ```bash
-git clone <your-repo-url> bldr && cd bldr
-# Deps: python3 is enough for the digest. The RESUME tool also needs LaTeX:
+git clone <your-repo-url> daily-digest && cd daily-digest
+# The resume tool also needs LaTeX (skip if you only want the digest):
 sudo apt-get install -y texlive-latex-base texlive-latex-recommended \
   texlive-latex-extra texlive-fonts-recommended texlive-fonts-extra poppler-utils
-cp .env.example .env        # then edit it (below)
-python3 server.py           # open http://127.0.0.1:8765
+cp .env.example .env      # add your keys (below)
+python3 server.py         # open http://127.0.0.1:8765
 ```
 
-Edit `.env` and set:
-- `OPENAI_API_KEY=sk-...` — the AI that writes your digest/resume.
-- **Gmail send** (use a Google **App Password**, not your login): `SMTP_HOST=smtp.gmail.com`, `SMTP_PORT=587`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_SECURITY=starttls`.
-- *(optional)* `IMAP_*` (same App Password) to manage the digest by replying to it.
+In `.env`, set three things:
 
-Then in the UI: fill **About / Goals / Schedule / Tasks**, set the **recipient + send time**, click **Preview digest**, then **Send now**. `.env` is gitignored.
+- **`OPENAI_API_KEY`** — powers the brief and resume optimization.
+- **Email delivery** (Gmail example, using a Google **App Password**): `SMTP_HOST=smtp.gmail.com`, `SMTP_PORT=587`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_SECURITY=starttls`.
+- **`IMAP_*`** *(optional, same App Password)* — enables inbox-based updates via reply.
 
-## Daily use — just reply to the email
+Then open the app, fill in **About you / Goals / Schedule / Tasks**, set your **recipient and send time**, hit **Preview**, and send yourself the first one.
 
-Reply in plain English; the next digest applies it:
-- `done: ship the API docs` · `add task: review Q3 budget, high, due Friday`
-- new deadlines (`mid-internship presentation next Friday`) → tracked & escalated
-- end-of-day reflections (what you did, what's blocking you, how you want to block the next days) → shape tomorrow's plan and opening
-- `more GPU news, less crypto` · `switched teams to Platform Infra` · a Korean sentence → graded
+*(Requires Python 3 — standard library only, nothing to `pip install`. Works on Windows + WSL, Linux, or macOS.)*
 
-## Run every morning automatically (Windows)
+## Wake up to it every morning
 
-From the repo's `tools/` folder in PowerShell:
+On Windows, register the scheduled tasks once:
+
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\tools\install_email_task.ps1     # emails at 07:00 daily
-powershell -ExecutionPolicy Bypass -File .\tools\install_startup_task.ps1   # (optional) UI at logon
+powershell -ExecutionPolicy Bypass -File .\tools\install_email_task.ps1     # 07:00 daily email
+powershell -ExecutionPolicy Bypass -File .\tools\install_startup_task.ps1   # keep the app running (optional)
 ```
-`uninstall_*.ps1` removes them. Test a send now: `python3 tools/send_digest.py --force`. Logs: `data/digest/*.log`.
 
-## Daily Digest — what it does
+`uninstall_*.ps1` reverses it. Prefer a desktop app? Run `powershell -File tools\build.ps1` to produce a Windows installer (`Setup.exe`); see [`PACKAGING_PLAN.md`](PACKAGING_PLAN.md).
 
-- **Email sections:** a gritty motivation line, Today's Focus, a time-chunked **Schedule**, weekly/daily **nested tasks** (priority: leading `'` = high, `'''` = critical; due dates, time estimates, auto-triage), What's New, **Reminders** (escalate as due dates near), interest-filtered **headlines**, progress, and a **language lesson**.
-- **Trackers** (only *new* items reported): `github`, `web` page/keyword watch, `inbox` (IMAP), **Workday** jobs, **Eightfold** jobs.
-- **Language practice:** Korean (TOPIK) or English vocabulary — per user.
-- **Korean mode:** header language toggle puts the **whole dashboard and the report in Korean**.
-- **Memory tab:** long-term facts that personalize every digest (seed from a resume, edit, or natural language).
-- **Multiple users:** header user picker — fully isolated data; each user gets their own recipient/time and can manage via email.
-- **Personalize:** color **themes** and geometric **background patterns** in the header (saved per user).
+## What's inside the brief
 
-## ResumeForge — what it does
+- **Today's Focus & Schedule** — priorities up top and a time-blocked plan. Mark items important with a leading `'` (or `'''` for critical); tasks carry due dates, time estimates, and automatic triage.
+- **Deadlines & reminders** that resurface and grow more prominent as the date approaches.
+- **Trackers** that report only what's *new*: GitHub issues/PRs, any web page or careers site, your inbox, and job postings from **Workday** and **Eightfold** career sites (auto-flagged to fit your profile).
+- **Headlines** from your sources, narrowed to the topics you care about.
+- **Language practice** — a daily Korean (TOPIK) or English-vocabulary lesson that doesn't repeat; reply with a sentence to have it graded.
+- **Memory** — an editable store of what matters about you, seedable from your resume.
 
-Paste/upload a profile (PDF, text, or JSON) + a job description → an optimized **one-page LaTeX PDF**. It reports "coverage gaps" you can close each pass, and follows [`RESUME_MANIFESTO.md`](RESUME_MANIFESTO.md).
+Customize from the header: color **themes**, geometric **backgrounds**, and a **Korean mode** that renders both the dashboard and your brief in Korean.
+
+## ResumeForge
+
+Give it your background (PDF, text, or JSON) and a job description; get back an optimized, single-page LaTeX resume built on an ATS-friendly template. It flags requirements it couldn't substantiate so you can fill gaps on the next pass.
 
 ```bash
 python3 generate_resume.py --resume me.pdf --jd-text job.txt --compile   # first run
-python3 generate_resume.py --jd-text job.txt --compile                   # later (reuses stored profile)
+python3 generate_resume.py --jd-text job.txt --compile                   # later runs reuse your profile
 ```
 
-## LLM providers
+## Under the hood
 
-Uses **OpenAI** by default (`OPENAI_API_KEY`). If you set an Anthropic-compatible gateway (`ANTHROPIC_*`) it's tried first and falls back to OpenAI, then to an offline plain digest — so a flaky gateway never blanks your email.
+- **Local & private.** Your data lives in `data/users/<id>/…` as plain JSON; `.env` holds your keys. Nothing leaves your machine except the AI/email calls you configure.
+- **Resilient AI.** Uses OpenAI by default; if you have an Anthropic-compatible gateway it's tried first, then falls back to OpenAI, then to a plain offline brief — so a flaky connection doesn't leave you without a morning email.
 
-## Ship it as a Windows `.exe`
+## Troubleshooting
 
-The code is packaging-ready (`app.py`, `app_paths.py`, `DailyDigest.spec`, `installer.iss`). Build a send-to-a-friend installer on Windows: `powershell -File tools\build.ps1` (needs Python + PyInstaller + Inno Setup). Details in [`PACKAGING_PLAN.md`](PACKAGING_PLAN.md).
-
-## Layout & troubleshooting
-
-- Per-user data: `data/users/<id>/…` (digest JSON + resume profile). `.env` holds keys. Nothing else to migrate.
-- **No email?** Check `data/digest/send.log`, your SMTP App Password, and that a recipient is set.
-- **Digest looks plain/"gutted"?** The LLM was unreachable — set `OPENAI_API_KEY`.
-- **Resume won't compile?** Install the `texlive-*` packages above.
-- **Port busy / paste blocked?** It binds `127.0.0.1:8765`; open that in a real browser.
+- **No email?** Check `data/digest/send.log`, confirm your SMTP App Password, and make sure a recipient is set.
+- **Brief looks plain?** The AI was unreachable — set `OPENAI_API_KEY`.
+- **Resume won't build?** Install the `texlive-*` packages above.
+- **Can't reach it / paste blocked?** It serves at `http://127.0.0.1:8765`; open that in a normal browser.

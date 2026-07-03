@@ -71,7 +71,9 @@ def build_lesson(state: dict, *, level: str = "advanced", today: str,
     seen = {w.lower() for w in state.get("seen_words", [])}
 
     lesson = None
-    if not offline and llm.have_key() or (not offline and llm.openai_configured()):
+    # Provider-agnostic: when online, try the LLM (post_json routes to whichever
+    # provider the digest activated); it falls back to the offline bank on error.
+    if not offline:
         try:
             avoid = ", ".join(list(seen)[-120:]) or "(none yet)"
             data = llm.post_json(
