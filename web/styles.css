@@ -22,8 +22,8 @@
   --warn: #ffd479;
   --danger: #ff8f9c;
   --shadow: 0 8px 24px rgba(8, 10, 30, 0.34);
-  --pattern: rgba(255, 255, 255, 0.14);   /* backdrop shape pattern (drop-shadow glow scales with this) */
-  --pattern-2: rgba(255, 255, 255, 0.08);
+  --pattern: rgba(255, 255, 255, 0.05);   /* line ink — keep low so pattern stays subtle; glow is a separate layer */
+  --pattern-2: rgba(255, 255, 255, 0.03);
   --bg-gradient: radial-gradient(140% 120% at 15% 10%, #2a2350 0%, #181a36 42%, #0c0d1c 100%);
   --blob-1: #6b7bff;
   --blob-2: #c569ff;
@@ -136,8 +136,8 @@ html[data-theme="daylight"] {
   --accent-soft: rgba(79,107,237,0.16); --accent-brd: rgba(79,107,237,0.40);
   --accent-glow: rgba(79,107,237,0.30);
   --shadow: 0 18px 50px rgba(40, 60, 120, 0.18);
-  --pattern: rgba(30, 41, 64, 0.16);
-  --pattern-2: rgba(30, 41, 64, 0.09);
+  --pattern: rgba(30, 41, 64, 0.06);
+  --pattern-2: rgba(30, 41, 64, 0.035);
   --bg-gradient: radial-gradient(140% 120% at 15% 10%, #eef1fb 0%, #e6ecf8 45%, #dde5f3 100%);
   --blob-1: #9db4ff; --blob-2: #d9b3ff; --blob-3: #a7ead9; --blob-4: #ffc6dd;
 }
@@ -163,16 +163,41 @@ body {
      from the document being taller than the screen). */
   background: var(--bg-gradient);
 }
-/* The pattern lives on its own layer so its glow never touches the blobs
-   (whose clipped corners otherwise cast a hard rectangular shadow). */
-.backdrop::before {
+/* ---- geometry is defined once as CSS vars per pattern (on .backdrop) and
+   consumed by TWO stacked layers so the glow is a real soft halo, not just a
+   brighter line:
+     .backdrop::before  = blurred, accent-tinted copy  -> the glow gradient
+     .backdrop::after   = crisp, subtle pattern         -> sits on top
+   Keeping the ink low (var(--pattern)) keeps lines subtle; the halo comes from
+   the separate blurred layer, so raising glow never brightens the lines. */
+.backdrop::before,
+.backdrop::after {
   content: ""; position: absolute; inset: 0;
-  background-image: radial-gradient(var(--pattern) 1.4px, transparent 1.6px);
-  background-size: 22px 22px;   /* clean default fallback */
-  /* accent-colored glow around the geometric pattern (all themes). The solid
-     accent inner shadow makes the halo actually visible (drop-shadow strength is
-     capped by the pattern's own alpha). */
-  filter: drop-shadow(0 0 2px var(--accent)) drop-shadow(0 0 6px var(--accent-glow));
+  background-image: var(--pat-image, radial-gradient(var(--pattern) 1.4px, transparent 1.6px));
+  background-size: var(--pat-size, 22px 22px);
+  background-position: var(--pat-pos, 0 0);
+  -webkit-mask-image: var(--pat-mask, none); mask-image: var(--pat-mask, none);
+  -webkit-mask-size: var(--pat-mask-size, 64px 64px); mask-size: var(--pat-mask-size, 64px 64px);
+  -webkit-mask-repeat: repeat; mask-repeat: repeat;
+}
+/* crisp, subtle pattern (top) */
+.backdrop::after { background-color: var(--pat-color, transparent); }
+/* soft glow halo (underneath). ONE consistent model for every pattern:
+   the crisp line is neutral (var(--pattern)); the glow is the accent color.
+   Gradient patterns supply an accent copy via --pat-glow-image (CSS blur makes
+   the halo). SVG-mask patterns supply a pre-blurred --pat-glow-mask filled with
+   --pat-glow-color (a CSS blur would be clipped by the mask). */
+.backdrop::before {
+  background-image: var(--pat-glow-image, var(--pat-image, radial-gradient(var(--accent-glow) 1.1px, transparent 1.4px)));
+  background-color: var(--pat-glow-color, transparent);
+  -webkit-mask-image: var(--pat-glow-mask, var(--pat-mask, none));
+  mask-image: var(--pat-glow-mask, var(--pat-mask, none));
+  /* Brighter, hue-shifted core (e.g. red -> orange) fading to the base accent
+     halo -> reads like heat/light coming off the pattern's own color. */
+  filter: blur(1.6px) saturate(1.35) brightness(1.3) hue-rotate(14deg)
+    drop-shadow(0 0 2px var(--accent-glow))
+    drop-shadow(0 0 5px var(--accent-glow));
+  opacity: 0.45;
 }
 .blob {
   position: absolute;
@@ -191,94 +216,119 @@ body {
    A lean, DISTINCT set. Ornate + true-fractal designs use SVG tiles painted through
    a CSS mask so they stay subtle and recolor with the theme (var(--pattern)). */
 
-html[data-pattern="none"] .backdrop::before { background-image: none; filter: none; }
+html[data-pattern="none"] .backdrop::before,
+html[data-pattern="none"] .backdrop::after {
+  background-image: none; background-color: transparent;
+  -webkit-mask-image: none; mask-image: none; filter: none;
+}
 
 /* --- simple --- */
-html[data-pattern="dots"] .backdrop::before {
-  background-image: radial-gradient(var(--pattern) 1.4px, transparent 1.6px);
-  background-size: 22px 22px;
+html[data-pattern="dots"] .backdrop {
+  --pat-image: radial-gradient(var(--pattern) 1px, transparent 1.3px);
+  --pat-glow-image: radial-gradient(var(--accent-glow) 1.2px, transparent 1.7px);
+  --pat-size: 30px 30px;
 }
-html[data-pattern="grid"] .backdrop::before {
-  background-image:
+html[data-pattern="grid"] .backdrop {
+  --pat-image:
     linear-gradient(var(--pattern) 1px, transparent 1px),
     linear-gradient(90deg, var(--pattern) 1px, transparent 1px);
-  background-size: 30px 30px, 30px 30px;
+  --pat-glow-image:
+    linear-gradient(var(--accent-glow) 1px, transparent 1px),
+    linear-gradient(90deg, var(--accent-glow) 1px, transparent 1px);
+  --pat-size: 44px 44px, 44px 44px;
 }
 
 /* --- ornate --- */
-/* Moroccan: interlocking-circle quatrefoil lattice (kept per request) */
-html[data-pattern="moroccan"] .backdrop::before {
-  background-image:
-    radial-gradient(circle at 50% 0%, transparent 63%, var(--pattern) 64% 66%, transparent 67%),
-    radial-gradient(circle at 0% 50%, transparent 63%, var(--pattern) 64% 66%, transparent 67%),
-    radial-gradient(circle at 100% 50%, transparent 63%, var(--pattern) 64% 66%, transparent 67%),
-    radial-gradient(circle at 50% 100%, transparent 63%, var(--pattern) 64% 66%, transparent 67%),
-    radial-gradient(circle at 50% 50%, transparent 63%, var(--pattern-2) 64% 66%, transparent 67%);
-  background-size: 48px 48px;
+/* Moroccan: interlocking-circle quatrefoil lattice */
+html[data-pattern="moroccan"] .backdrop {
+  --pat-image:
+    radial-gradient(circle at 50% 0%, transparent 63%, var(--pattern) 64% 65.5%, transparent 66.5%),
+    radial-gradient(circle at 0% 50%, transparent 63%, var(--pattern) 64% 65.5%, transparent 66.5%),
+    radial-gradient(circle at 100% 50%, transparent 63%, var(--pattern) 64% 65.5%, transparent 66.5%),
+    radial-gradient(circle at 50% 100%, transparent 63%, var(--pattern) 64% 65.5%, transparent 66.5%),
+    radial-gradient(circle at 50% 50%, transparent 63%, var(--pattern-2) 64% 65.5%, transparent 66.5%);
+  --pat-glow-image:
+    radial-gradient(circle at 50% 0%, transparent 63%, var(--accent-glow) 64% 65.5%, transparent 66.5%),
+    radial-gradient(circle at 0% 50%, transparent 63%, var(--accent-glow) 64% 65.5%, transparent 66.5%),
+    radial-gradient(circle at 100% 50%, transparent 63%, var(--accent-glow) 64% 65.5%, transparent 66.5%),
+    radial-gradient(circle at 50% 100%, transparent 63%, var(--accent-glow) 64% 65.5%, transparent 66.5%),
+    radial-gradient(circle at 50% 50%, transparent 63%, var(--accent-glow) 64% 65.5%, transparent 66.5%);
+  --pat-size: 62px 62px;
 }
 /* Isometric cubes (true 3D lattice) */
-html[data-pattern="isometric"] .backdrop::before {
-  background-image:
-    linear-gradient(30deg, var(--pattern) 12%, transparent 12.5%, transparent 87%, var(--pattern) 87.5%, var(--pattern)),
-    linear-gradient(150deg, var(--pattern) 12%, transparent 12.5%, transparent 87%, var(--pattern) 87.5%, var(--pattern)),
-    linear-gradient(30deg, var(--pattern) 12%, transparent 12.5%, transparent 87%, var(--pattern) 87.5%, var(--pattern)),
-    linear-gradient(150deg, var(--pattern) 12%, transparent 12.5%, transparent 87%, var(--pattern) 87.5%, var(--pattern)),
-    linear-gradient(60deg, var(--pattern-2) 25%, transparent 25.5%, transparent 75%, var(--pattern-2) 75%, var(--pattern-2)),
-    linear-gradient(60deg, var(--pattern-2) 25%, transparent 25.5%, transparent 75%, var(--pattern-2) 75%, var(--pattern-2));
-  background-size: 42px 74px;
-  background-position: 0 0, 0 0, 21px 37px, 21px 37px, 0 0, 21px 37px;
+html[data-pattern="isometric"] .backdrop {
+  --pat-image:
+    linear-gradient(30deg, var(--pattern) 12%, transparent 12.4%, transparent 87.6%, var(--pattern) 88%, var(--pattern)),
+    linear-gradient(150deg, var(--pattern) 12%, transparent 12.4%, transparent 87.6%, var(--pattern) 88%, var(--pattern)),
+    linear-gradient(30deg, var(--pattern) 12%, transparent 12.4%, transparent 87.6%, var(--pattern) 88%, var(--pattern)),
+    linear-gradient(150deg, var(--pattern) 12%, transparent 12.4%, transparent 87.6%, var(--pattern) 88%, var(--pattern)),
+    linear-gradient(60deg, var(--pattern-2) 25%, transparent 25.4%, transparent 75%, var(--pattern-2) 75%, var(--pattern-2)),
+    linear-gradient(60deg, var(--pattern-2) 25%, transparent 25.4%, transparent 75%, var(--pattern-2) 75%, var(--pattern-2));
+  --pat-glow-image:
+    linear-gradient(30deg, var(--accent-glow) 12%, transparent 12.4%, transparent 87.6%, var(--accent-glow) 88%, var(--accent-glow)),
+    linear-gradient(150deg, var(--accent-glow) 12%, transparent 12.4%, transparent 87.6%, var(--accent-glow) 88%, var(--accent-glow)),
+    linear-gradient(30deg, var(--accent-glow) 12%, transparent 12.4%, transparent 87.6%, var(--accent-glow) 88%, var(--accent-glow)),
+    linear-gradient(150deg, var(--accent-glow) 12%, transparent 12.4%, transparent 87.6%, var(--accent-glow) 88%, var(--accent-glow)),
+    linear-gradient(60deg, var(--accent-glow) 25%, transparent 25.4%, transparent 75%, var(--accent-glow) 75%, var(--accent-glow)),
+    linear-gradient(60deg, var(--accent-glow) 25%, transparent 25.4%, transparent 75%, var(--accent-glow) 75%, var(--accent-glow));
+  --pat-size: 54px 94px;
+  --pat-pos: 0 0, 0 0, 27px 47px, 27px 47px, 0 0, 27px 47px;
 }
 /* Arabesque: 8-point Islamic star lattice (SVG through a mask) */
-html[data-pattern="arabesque"] .backdrop::before {
-  background-image: none;
-  background-color: var(--pattern);
-  -webkit-mask-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='64' height='64' viewBox='0 0 64 64'><g fill='none' stroke='black' stroke-width='1.5'><rect x='14' y='14' width='36' height='36'/><rect x='14' y='14' width='36' height='36' transform='rotate(45 32 32)'/><circle cx='32' cy='32' r='6'/></g></svg>");
-  mask-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='64' height='64' viewBox='0 0 64 64'><g fill='none' stroke='black' stroke-width='1.5'><rect x='14' y='14' width='36' height='36'/><rect x='14' y='14' width='36' height='36' transform='rotate(45 32 32)'/><circle cx='32' cy='32' r='6'/></g></svg>");
-  -webkit-mask-size: 64px 64px; mask-size: 64px 64px;
-  -webkit-mask-repeat: repeat; mask-repeat: repeat;
+html[data-pattern="arabesque"] .backdrop {
+  --pat-image: none;
+  --pat-color: var(--pattern);
+  --pat-glow-color: var(--accent-glow);
+  --pat-mask: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='64' height='64' viewBox='0 0 64 64'><g fill='none' stroke='black' stroke-width='1'><rect x='14' y='14' width='36' height='36'/><rect x='14' y='14' width='36' height='36' transform='rotate(45 32 32)'/><circle cx='32' cy='32' r='6'/></g></svg>");
+  --pat-glow-mask: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='64' height='64' viewBox='0 0 64 64'><defs><filter id='b' x='-25%' y='-25%' width='150%' height='150%'><feGaussianBlur stdDeviation='1'/></filter></defs><g filter='url(%23b)' fill='none' stroke='black' stroke-width='1.3'><rect x='14' y='14' width='36' height='36'/><rect x='14' y='14' width='36' height='36' transform='rotate(45 32 32)'/><circle cx='32' cy='32' r='6'/></g></svg>");
+  --pat-mask-size: 82px 82px;
 }
 /* Flower of Life: hex-packed overlapping circles (radius = spacing => petals) */
-html[data-pattern="weave"] .backdrop::before {
-  background-image: none;
-  background-color: var(--pattern);
-  -webkit-mask-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='32' height='55' viewBox='0 0 32 55'><g fill='none' stroke='black' stroke-width='1.1'><circle cx='0' cy='0' r='32'/><circle cx='32' cy='0' r='32'/><circle cx='0' cy='55' r='32'/><circle cx='32' cy='55' r='32'/><circle cx='16' cy='27.5' r='32'/><circle cx='-16' cy='27.5' r='32'/><circle cx='48' cy='27.5' r='32'/><circle cx='16' cy='-27.5' r='32'/><circle cx='16' cy='82.5' r='32'/></g></svg>");
-  mask-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='32' height='55' viewBox='0 0 32 55'><g fill='none' stroke='black' stroke-width='1.1'><circle cx='0' cy='0' r='32'/><circle cx='32' cy='0' r='32'/><circle cx='0' cy='55' r='32'/><circle cx='32' cy='55' r='32'/><circle cx='16' cy='27.5' r='32'/><circle cx='-16' cy='27.5' r='32'/><circle cx='48' cy='27.5' r='32'/><circle cx='16' cy='-27.5' r='32'/><circle cx='16' cy='82.5' r='32'/></g></svg>");
-  -webkit-mask-size: 32px 55px; mask-size: 32px 55px;
-  -webkit-mask-repeat: repeat; mask-repeat: repeat;
+html[data-pattern="weave"] .backdrop {
+  --pat-image: none;
+  --pat-color: var(--pattern);
+  --pat-glow-color: var(--accent-glow);
+  --pat-mask: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='32' height='55' viewBox='0 0 32 55'><g fill='none' stroke='black' stroke-width='0.8'><circle cx='0' cy='0' r='32'/><circle cx='32' cy='0' r='32'/><circle cx='0' cy='55' r='32'/><circle cx='32' cy='55' r='32'/><circle cx='16' cy='27.5' r='32'/><circle cx='-16' cy='27.5' r='32'/><circle cx='48' cy='27.5' r='32'/><circle cx='16' cy='-27.5' r='32'/><circle cx='16' cy='82.5' r='32'/></g></svg>");
+  --pat-glow-mask: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='32' height='55' viewBox='0 0 32 55'><defs><filter id='b' x='-25%' y='-25%' width='150%' height='150%'><feGaussianBlur stdDeviation='0.9'/></filter></defs><g filter='url(%23b)' fill='none' stroke='black' stroke-width='1.1'><circle cx='0' cy='0' r='32'/><circle cx='32' cy='0' r='32'/><circle cx='0' cy='55' r='32'/><circle cx='32' cy='55' r='32'/><circle cx='16' cy='27.5' r='32'/><circle cx='-16' cy='27.5' r='32'/><circle cx='48' cy='27.5' r='32'/><circle cx='16' cy='-27.5' r='32'/><circle cx='16' cy='82.5' r='32'/></g></svg>");
+  --pat-mask-size: 44px 76px;
 }
 
 /* --- fractal (real, via SVG) --- */
 /* Sierpinski gasket - nested triangles (depth 2), unmistakably fractal */
-html[data-pattern="sierpinski"] .backdrop::before {
-  background-image: none;
-  background-color: var(--pattern);
-  -webkit-mask-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='106' viewBox='0 0 120 106'><polygon points='2,104 60,2 118,104' fill='none' stroke='black' stroke-width='1.3'/><g fill='black'><polygon points='60,104 31,53 89,53'/><polygon points='31,104 45.5,78.5 16.5,78.5'/><polygon points='89,104 103.5,78.5 74.5,78.5'/><polygon points='60,53 74.5,27.5 45.5,27.5'/></g></svg>");
-  mask-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='106' viewBox='0 0 120 106'><polygon points='2,104 60,2 118,104' fill='none' stroke='black' stroke-width='1.3'/><g fill='black'><polygon points='60,104 31,53 89,53'/><polygon points='31,104 45.5,78.5 16.5,78.5'/><polygon points='89,104 103.5,78.5 74.5,78.5'/><polygon points='60,53 74.5,27.5 45.5,27.5'/></g></svg>");
-  -webkit-mask-size: 120px 106px; mask-size: 120px 106px;
-  -webkit-mask-repeat: repeat; mask-repeat: repeat;
+html[data-pattern="sierpinski"] .backdrop {
+  --pat-image: none;
+  --pat-color: var(--pattern);
+  --pat-glow-color: var(--accent-glow);
+  --pat-mask: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='106' viewBox='0 0 120 106'><polygon points='2,104 60,2 118,104' fill='none' stroke='black' stroke-width='1'/><g fill='black'><polygon points='60,104 31,53 89,53'/><polygon points='31,104 45.5,78.5 16.5,78.5'/><polygon points='89,104 103.5,78.5 74.5,78.5'/><polygon points='60,53 74.5,27.5 45.5,27.5'/></g></svg>");
+  --pat-glow-mask: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='106' viewBox='0 0 120 106'><defs><filter id='b' x='-20%' y='-20%' width='140%' height='140%'><feGaussianBlur stdDeviation='1.1'/></filter></defs><g filter='url(%23b)'><polygon points='2,104 60,2 118,104' fill='none' stroke='black' stroke-width='1.3'/><g fill='black'><polygon points='60,104 31,53 89,53'/><polygon points='31,104 45.5,78.5 16.5,78.5'/><polygon points='89,104 103.5,78.5 74.5,78.5'/><polygon points='60,53 74.5,27.5 45.5,27.5'/></g></g></svg>");
+  --pat-mask-size: 150px 132px;
 }
 /* Nested hexagrams - self-similar star fractal (SVG mask) */
-html[data-pattern="hexstar"] .backdrop::before {
-  background-image: none;
-  background-color: var(--pattern);
-  -webkit-mask-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='72' height='72' viewBox='0 0 72 72'><g fill='none' stroke='black' stroke-width='1.4'><polygon points='36,6 63,54 9,54'/><polygon points='36,66 9,18 63,18'/><polygon points='36,24 51,48 21,48'/><polygon points='36,48 21,24 51,24'/></g></svg>");
-  mask-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='72' height='72' viewBox='0 0 72 72'><g fill='none' stroke='black' stroke-width='1.4'><polygon points='36,6 63,54 9,54'/><polygon points='36,66 9,18 63,18'/><polygon points='36,24 51,48 21,48'/><polygon points='36,48 21,24 51,24'/></g></svg>");
-  -webkit-mask-size: 72px 72px; mask-size: 72px 72px;
-  -webkit-mask-repeat: repeat; mask-repeat: repeat;
+html[data-pattern="hexstar"] .backdrop {
+  --pat-image: none;
+  --pat-color: var(--pattern);
+  --pat-glow-color: var(--accent-glow);
+  --pat-mask: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='72' height='72' viewBox='0 0 72 72'><g fill='none' stroke='black' stroke-width='1'><polygon points='36,6 63,54 9,54'/><polygon points='36,66 9,18 63,18'/><polygon points='36,24 51,48 21,48'/><polygon points='36,48 21,24 51,24'/></g></svg>");
+  --pat-glow-mask: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='72' height='72' viewBox='0 0 72 72'><defs><filter id='b' x='-25%' y='-25%' width='150%' height='150%'><feGaussianBlur stdDeviation='1'/></filter></defs><g filter='url(%23b)' fill='none' stroke='black' stroke-width='1.3'><polygon points='36,6 63,54 9,54'/><polygon points='36,66 9,18 63,18'/><polygon points='36,24 51,48 21,48'/><polygon points='36,48 21,24 51,24'/></g></svg>");
+  --pat-mask-size: 92px 92px;
 }
 
 /* --- glow + mixes (reuse the colored blobs) --- */
-html[data-pattern="aurora"] .backdrop::before { background-image: none; filter: none; }
+html[data-pattern="aurora"] .backdrop::before,
+html[data-pattern="aurora"] .backdrop::after { background-image: none; background-color: transparent; filter: none; }
 html[data-pattern="aurora"] .blob { opacity: 0.5; filter: blur(78px); animation: drift 32s ease-in-out infinite; }
 html[data-pattern="aurora"] .blob-2 { animation-delay: -8s; }
 html[data-pattern="aurora"] .blob-3 { animation-delay: -16s; }
 html[data-pattern="aurora"] .blob-4 { animation-delay: -24s; }
 
-html[data-pattern="nebula"] .backdrop::before {
-  background-image:
+html[data-pattern="nebula"] .backdrop {
+  --pat-image:
     linear-gradient(var(--pattern-2) 1px, transparent 1px),
     linear-gradient(90deg, var(--pattern-2) 1px, transparent 1px);
-  background-size: 34px 34px, 34px 34px;
+  --pat-glow-image:
+    linear-gradient(var(--accent-glow) 1px, transparent 1px),
+    linear-gradient(90deg, var(--accent-glow) 1px, transparent 1px);
+  --pat-size: 46px 46px, 46px 46px;
 }
 html[data-pattern="nebula"] .blob { opacity: 0.34; filter: blur(88px); }
 

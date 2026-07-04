@@ -1,12 +1,16 @@
 """Parse the planner text format into a structured day plan + calendar events.
 
 Format (as used by the author):
-  - A bare number on its own line is an HOUR marker: 11 = 11AM, 12 = 12PM, 1 = 1PM...
-    The sequence is walked so each hour is the next clock hour after the previous,
-    rolling 11 -> 12 -> 1 ... -> 12 (midnight) across the day.
+  - A bare number on its own line is an HOUR marker (1-12). The day is a single
+    chronological, strictly-increasing sequence that ENDS in the evening (PM), so
+    times are anchored from the END and inferred backwards: the last hour is PM
+    (a trailing 12 = midnight / SLEEP), and each earlier hour is the next clock
+    hour before it. Example: a plan running 1 -> 11 means 1 PM ... 11 PM (NOT
+    1 AM), and 11 -> 12(SLEEP) means 11 AM ... 12 AM (midnight).
   - Lines indented one level under an hour are TASKS for that hour.
   - Lines indented a further level are SUBTASKS of the task above them.
-  - A task/subtask whose text starts with an apostrophe (') is IMPORTANT.
+  - A task/subtask whose text starts with an apostrophe (') is IMPORTANT
+    (three or more ''' marks it CRITICAL).
 
 Nothing is dropped: every task and subtask is preserved verbatim (minus the
 leading "'" marker, which becomes the ``important`` flag).
@@ -79,22 +83,35 @@ def _fmt_time(hour24: int) -> str:
     return f"{disp} {suffix}"
 
 
-def _next_hour24(prev: int | None, label: int) -> int:
-    """Map an hour label (1-12) to a strictly-increasing 24h+ clock value."""
-    target_mod = label % 12  # 12 -> 0
-    if prev is None:
-        # First hour of the day: assume the planner starts in the morning/at noon.
-        return 12 if label == 12 else label
-    h = prev + 1
-    while h % 12 != target_mod:
-        h += 1
-    return h
+def _assign_hours(labels: list) -> list:
+    """Map an ordered list of hour labels (1-12) to strictly-increasing 24h values.
+
+    Anchored from the END because a planner day ends in the evening:
+      - the last hour is PM (label + 12), except a trailing 12 = midnight (24), and
+      - each earlier hour is the greatest clock hour still before the next one.
+    Returns one 24h int per label (0-24; >=24 means it crossed midnight).
+    """
+    n = len(labels)
+    out = [0] * n
+    next_h = None
+    for i in range(n - 1, -1, -1):
+        label = labels[i]
+        mod = label % 12  # 12 -> 0
+        if next_h is None:  # anchor: last hour of the day
+            h = 24 if label == 12 else label + 12  # midnight, else PM
+        else:
+            h = next_h - 1
+            while h % 12 != mod:
+                h -= 1
+        out[i] = h
+        next_h = h
+    return out
 
 
 def parse_schedule(text: str) -> dict:
     """Parse planner text into {blocks, tasks_flat, events}. Never drops content."""
     blocks: list[Block] = []
-    prev24: int | None = None
+    hour_blocks: list[Block] = []  # real hour markers, in order (times assigned later)
     cur: Block | None = None
     last_task: Task | None = None
 
@@ -106,15 +123,9 @@ def parse_schedule(text: str) -> dict:
 
         if level == 0 and _HOUR_RE.match(stripped):
             label = int(stripped)
-            h24 = _next_hour24(prev24, label)
-            prev24 = h24
-            cur = Block(
-                hour_label=label,
-                hour24=h24 % 24,
-                day_offset=h24 // 24,
-                time_str=_fmt_time(h24),
-            )
+            cur = Block(hour_label=label, hour24=-1, day_offset=0, time_str="")
             blocks.append(cur)
+            hour_blocks.append(cur)
             last_task = None
             continue
 
@@ -135,6 +146,12 @@ def parse_schedule(text: str) -> dict:
         task = Task(text=text_val, important=important, critical=critical)
         cur.tasks.append(task)
         last_task = task
+
+    # Assign clock times to the hour markers, anchored from the end of the day.
+    for b, h in zip(hour_blocks, _assign_hours([b.hour_label for b in hour_blocks])):
+        b.hour24 = h % 24
+        b.day_offset = h // 24
+        b.time_str = _fmt_time(h)
 
     return {
         "blocks": [b.to_dict() for b in blocks],

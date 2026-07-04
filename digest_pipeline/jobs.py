@@ -10,6 +10,8 @@ which you paste into the tracker. Optional named PRESETS can be added below.
 
 import json
 import re
+import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -18,9 +20,15 @@ from . import store
 ROOT = Path(__file__).resolve().parent.parent
 RESUME_PROFILE = ROOT / "data" / "profile.json"
 
-# Optional Workday "CXS" job-search presets keyed by a short name. Empty by
-# default - paste a company's CXS jobs URL into the tracker's config instead.
-PRESETS = {}
+# Optional Workday "CXS" job-search presets keyed by a short name. Paste a
+# company's CXS jobs URL into the tracker config for anything not listed here.
+PRESETS = {
+    "nvidia": {
+        "label": "NVIDIA",
+        "cxs": "https://nvidia.wd5.myworkdayjobs.com/wday/cxs/nvidia/NVIDIAExternalCareerSite/jobs",
+        "site_url": "https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite",
+    },
+}
 
 DEFAULT_PROFILE_KEYWORDS = [
     "machine learning", "ml", "deep learning", "ai", "compiler", "cuda", "gpu",
@@ -120,22 +128,71 @@ def profile_search_terms(cfg: dict, kws: list) -> list:
     return out[:3] or ["machine learning"]
 
 
-_UA = "Mozilla/5.0 (DailyDigest job tracker)"
+_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+       "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
 
 
-def _query_workday(cxs_url: str, search_text: str, want: int = 60) -> list:
+class JobsUnavailable(RuntimeError):
+    """The careers site returned a non-JSON / blocked / maintenance response."""
+
+
+def _referer(cxs_url: str) -> str:
+    # e.g. https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite
+    base = cxs_url.split("/wday/")[0]
+    site = cxs_url.rstrip("/").split("/")[-2] if "/wday/cxs/" in cxs_url else ""
+    return f"{base}/{site}" if site else base
+
+
+def _post_cxs(cxs_url: str, payload: dict, referer: str) -> dict:
+    """POST once to the CXS endpoint and require a JSON response (else raise)."""
+    req = urllib.request.Request(
+        cxs_url, data=json.dumps(payload).encode(), method="POST", headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "Accept-Language": "en-US,en;q=0.9",
+            "User-Agent": _UA,
+            "Referer": referer,
+            "Origin": referer.split("/", 3)[0] + "//" + referer.split("/")[2],
+        })
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            ctype = r.headers.get("Content-Type", "")
+            raw = r.read().decode("utf-8", "replace").strip()
+    except urllib.error.HTTPError as e:
+        code = e.code
+        if code in (403, 429, 503):
+            raise JobsUnavailable(
+                f"careers site refused automated requests (HTTP {code}). This is "
+                f"usually rate-limiting/bot-blocking from a shared network IP; try later.")
+        raise JobsUnavailable(f"HTTP {code} from careers site.")
+    if "application/json" not in ctype or not raw or raw[:1] not in "{[":
+        # Workday serves an HTML page ("Workday is currently unavailable") when it
+        # blocks or is down.
+        raise JobsUnavailable(
+            "careers site returned a non-JSON page (likely temporarily unavailable "
+            "or blocking automated requests from this network).")
+    return json.loads(raw)
+
+
+def _query_workday(cxs_url: str, search_text: str, want: int = 40) -> list:
     """Page through the Workday CXS endpoint (it caps each page at 20)."""
     out = []
     offset = 0
     page = 20
+    referer = _referer(cxs_url)
     while len(out) < want:
-        body = json.dumps({"appliedFacets": {}, "limit": page, "offset": offset,
-                           "searchText": search_text}).encode()
-        req = urllib.request.Request(cxs_url, data=body, method="POST", headers={
-            "Content-Type": "application/json", "Accept": "application/json", "User-Agent": _UA,
-        })
-        with urllib.request.urlopen(req, timeout=30) as r:
-            data = json.loads(r.read().decode("utf-8"))
+        payload = {"appliedFacets": {}, "limit": page, "offset": offset,
+                   "searchText": search_text}
+        data = None
+        for attempt in range(2):  # one retry on transient block
+            try:
+                data = _post_cxs(cxs_url, payload, referer)
+                break
+            except JobsUnavailable:
+                if attempt == 0:
+                    time.sleep(1.5)
+                    continue
+                raise
         postings = data.get("jobPostings", [])
         if not postings:
             break
@@ -206,6 +263,12 @@ def poll(tracker: dict, state: dict):
     for kind, search in queries:
         try:
             posts = _query_workday(cxs, search, want=int(cfg.get("limit", 40)))
+        except JobsUnavailable as exc:
+            # Site is blocking/unavailable -> all queries will fail; report once and
+            # keep the previous state so we don't lose already-seen ids.
+            return ([{"source": name,
+                      "text": f"{name}: {exc} (will retry next run)", "error": True}],
+                    state)
         except Exception as exc:  # noqa: BLE001
             collected[f"err-{kind}"] = {"source": name, "text": f"(query '{search}' failed: {exc})", "error": True}
             continue

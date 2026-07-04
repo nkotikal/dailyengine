@@ -434,12 +434,7 @@ def build_digest(cfg: dict | None = None, *, when: datetime | None = None,
     # Choose the LLM provider for this whole run BEFORE any side effects (so a defer
     # consumes nothing). May raise SendDeferred for scheduled sends.
     chosen = _choose_llm(cfg, when, allow_defer=allow_defer)
-    # Use the model that matches the chosen provider (OpenAI model for OpenAI,
-    # the Anthropic model for the gateway) - never cross them.
-    if chosen == "openai":
-        llm.set_active("openai", cfg.get("openai_model"))
-    else:
-        llm.set_active("anthropic", cfg.get("model") or None)
+    llm.set_active("openai" if chosen == "openai" else "anthropic", cfg.get("openai_model"))
     offline = (chosen == "offline")
 
     # On a real send with a working LLM: apply email replies first (reflections,
@@ -630,6 +625,9 @@ def build_digest(cfg: dict | None = None, *, when: datetime | None = None,
     data = _finalize_sections(data, news_items=news_items, lang_title=lang_title,
                               lang_icon=lang_icon, lang_items=lang_items,
                               schedule=parsed_schedule, schedule_title=schedule_title)
+    # Reminders due today / overdue: surfaced conspicuously at the very top.
+    data["reminder_alerts"] = [r for r in reminder_rows
+                               if r.get("days") is not None and r["days"] <= 0]
     if not data.get("motivation"):
         data["motivation"] = _offline_motivation(when.date(), rough=_rough_day(reflection_obj))
 
@@ -724,6 +722,36 @@ def render_html(data: dict, when_human: str) -> str:
         f'<div style="margin-top:12px;font-size:20px;letter-spacing:6px;">'
         f'\U0001F3AF \U0001F4F0 \U0001F4C5 \U0001F1F0\U0001F1F7</div></div>',
     ]
+    # Conspicuous alert for reminders that are due today / overdue - right at the top.
+    alerts = data.get("reminder_alerts") or []
+    if alerts:
+        rows_html = []
+        for x in alerts:
+            days = x.get("days")
+            if days is not None and days < 0:
+                tag, tagbg = f"OVERDUE {-days}d", "#ff2d55"
+            else:
+                tag, tagbg = "TODAY", "#ff8f2e"
+            due = x.get("due") or ""
+            rows_html.append(
+                f'<div style="display:flex;align-items:flex-start;gap:10px;'
+                f'padding:9px 0;border-top:1px solid rgba(255,255,255,0.14);">'
+                f'<span style="flex:0 0 auto;background:{tagbg};color:#1a0000;'
+                f'font-size:10.5px;font-weight:800;letter-spacing:.4px;padding:3px 8px;'
+                f'border-radius:6px;white-space:nowrap;">{_esc(tag)}</span>'
+                f'<span style="font-size:16px;line-height:1.5;color:#fff;font-weight:700;">'
+                f'{_esc(x.get("text",""))}'
+                f'{f" <span style=\'color:#ffd9d9;font-weight:600;font-size:13px;\'>({_esc(due)})</span>" if due else ""}'
+                f'</span></div>'
+            )
+        parts.append(
+            f'<div style="margin:16px 4px 4px;padding:16px 20px;border-radius:16px;'
+            f'background:linear-gradient(135deg,#3a0d18,#4a1220);border:2px solid #ff2d55;'
+            f'box-shadow:0 8px 26px rgba(255,45,85,0.35);">'
+            f'<div style="font-size:13px;letter-spacing:1.6px;text-transform:uppercase;'
+            f'color:#ff7a95;font-weight:800;margin-bottom:2px;">\u23F0 Reminders for today</div>'
+            + "".join(rows_html) + '</div>'
+        )
     if data.get("motivation"):
         parts.append(
             f'<div style="margin:16px 4px 4px;padding:16px 18px;border-radius:14px;'
@@ -868,6 +896,15 @@ def render_html(data: dict, when_human: str) -> str:
 
 def render_text(data: dict, when_human: str) -> str:
     lines = [f"DAILY DIGEST  -  {when_human}", "=" * 48, ""]
+    alerts = data.get("reminder_alerts") or []
+    if alerts:
+        lines.append("!! REMINDERS FOR TODAY !!")
+        for x in alerts:
+            days = x.get("days")
+            tag = f"OVERDUE {-days}d" if (days is not None and days < 0) else "TODAY"
+            due = f" ({x.get('due')})" if x.get("due") else ""
+            lines.append(f"  [{tag}] {x.get('text','')}{due}")
+        lines.append("")
     if data.get("motivation"):
         lines += [f">> {data['motivation']}", ""]
     if data.get("greeting"):
