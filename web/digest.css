@@ -277,4 +277,14 @@
   border-radius: 999px; background: var(--accent-soft); color: var(--accent); border: none; cursor: pointer; }
 .m-imp { font-size: 11px; color: var(--text-soft); }
 .m-time { font-size: 10.5px; color: var(--text-faint); }
+.m-src { font-size: 10px; text-transform: uppercase; letter-spacing: .5px; font-weight: 700; }
 .m-empty { font-size: 12.5px; color: var(--text-faint); padding: 6px 2px; }
+.m-item-fresh { border-color: rgba(95,230,180,0.45); box-shadow: 0 0 0 1px rgba(95,230,180,0.15) inset; }
+.m-new { display: inline-block; font-size: 9.5px; font-weight: 800; letter-spacing: .5px;
+  color: #0c0d1c; background: var(--ok); padding: 1px 6px; border-radius: 999px; margin-right: 7px;
+  vertical-align: middle; }
+.m-sort { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
+.m-sort-label { font-size: 11px; color: var(--text-faint); }
+.m-sort-btn { font-size: 11.5px; padding: 4px 10px; border-radius: 999px; cursor: pointer;
+  color: var(--text-soft); border: 1px solid var(--glass-brd); background: var(--glass-bg); }
+.m-sort-btn.active { color: #0c0d1c; background: linear-gradient(135deg, var(--accent), var(--accent-2)); border-color: transparent; }

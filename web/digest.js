@@ -43,6 +43,21 @@
     try { localStorage.setItem("digestSub", which); } catch (e) { /* ignore */ }
   }
 
+  function switchMemorySub(which) {
+    const tabs = document.querySelectorAll("#memory-subtabs .subtab");
+    let valid = false;
+    tabs.forEach((b) => { if (b.dataset.sub === which) valid = true; });
+    if (!valid) which = "memories";
+    tabs.forEach((b) => b.classList.toggle("active", b.dataset.sub === which));
+    document.querySelectorAll("#view-memory .glass.panel[data-group]").forEach((p) => {
+      p.hidden = p.dataset.group !== which;
+    });
+    // The grid wrapper for the memories cards should collapse on the Profile tab.
+    const grid = document.querySelector("#view-memory .grid");
+    if (grid) grid.hidden = which !== "memories";
+    try { localStorage.setItem("memorySub", which); } catch (e) { /* ignore */ }
+  }
+
   function applyLanguageUI() {
     const lang = ($("d-language") && $("d-language").value) || "korean";
     if ($("d-korean-opts")) $("d-korean-opts").hidden = lang !== "korean";
@@ -1049,6 +1064,7 @@
   let memories = [];
   let memCategories = [];
   let memFilter = "all";
+  let memSort = "importance";
   let memResumeB64 = null;
 
   function mError(msg) { const el = $("m-error"); el.textContent = msg || ""; el.hidden = !msg; }
@@ -1063,23 +1079,41 @@
     $("m-filter").querySelectorAll(".m-chip").forEach((ch) =>
       ch.addEventListener("click", () => { memFilter = ch.dataset.cat; renderMemory(); }));
 
+    const recent = (m) => (m.updated_at || m.created_at || "");
     const shown = memories
       .filter((m) => memFilter === "all" || m.category === memFilter)
-      .sort((a, b) => (b.importance || 0) - (a.importance || 0));
+      .sort((a, b) => memSort === "recent"
+        ? recent(b).localeCompare(recent(a))
+        : (b.importance || 0) - (a.importance || 0));
     const list = $("m-list");
     if (!shown.length) { list.innerHTML = `<div class="m-empty">No memories yet. Upload a resume or tell it about yourself.</div>`; return; }
+    const SOURCE_COLOR = {
+      reflection: "var(--ok)", compressed: "var(--accent)", nl: "#c08cff",
+      resume: "var(--text-faint)", manual: "var(--text-faint)",
+    };
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const daysAgo = (s) => {
+      const d = (s || "").slice(0, 10);
+      if (!d) return 999;
+      return Math.round((Date.parse(todayStr) - Date.parse(d)) / 86400000);
+    };
     list.innerHTML = shown.map((m) => {
       const imp = m.importance == null ? 60 : m.importance;
       const impColor = imp >= 66 ? "var(--ok)" : (imp >= 33 ? "var(--warn)" : "var(--text-faint)");
-      const comp = m.source === "compressed" ? ` · <span style="color:var(--accent)">compressed</span>` : "";
+      const src = m.source || "manual";
+      const srcColor = SOURCE_COLOR[src] || "var(--text-faint)";
+      const isNew = daysAgo(m.created_at) <= 3;
+      const isFresh = daysAgo(recent(m)) <= 3;
+      const newTag = isNew ? `<span class="m-new">NEW</span>` : "";
       return `
-      <div class="m-item">
+      <div class="m-item${isFresh ? " m-item-fresh" : ""}">
         <div class="m-item-body">
-          <div class="m-item-text" data-id="${m.id}">${escapeHtml(m.text)}</div>
+          <div class="m-item-text" data-id="${m.id}">${newTag}${escapeHtml(m.text)}</div>
           <div class="m-item-meta">
             <span class="m-cat" data-id="${m.id}" title="Click to change category">${escapeHtml(m.category)}</span>
+            <span class="m-src" style="color:${srcColor}" title="How this memory was created">${escapeHtml(src)}</span>
             <span class="m-imp" title="Importance"><span style="color:${impColor}">●</span> ${imp}</span>
-            <span class="m-time">${escapeHtml((m.updated_at || "").slice(0, 10))}${comp}</span>
+            <span class="m-time" title="Created ${escapeHtml((m.created_at||'').slice(0,10))} · updated ${escapeHtml((m.updated_at||'').slice(0,10))}">${escapeHtml(recent(m).slice(0, 10))}</span>
           </div>
         </div>
         <div class="m-controls">
@@ -1288,6 +1322,13 @@
     $("m-add-direct").addEventListener("click", addDirectMemory);
     $("m-profile-save").addEventListener("click", saveProfileBase);
     $("m-evolve").addEventListener("click", evolveMemory);
+    $("m-sort").querySelectorAll(".m-sort-btn").forEach((b) =>
+      b.addEventListener("click", () => {
+        memSort = b.dataset.sort;
+        $("m-sort").querySelectorAll(".m-sort-btn").forEach((x) =>
+          x.classList.toggle("active", x === b));
+        renderMemory();
+      }));
     $("d-save").addEventListener("click", () => saveConfig(false));
     $("d-add-update").addEventListener("click", addUpdate);
     $("d-update-input").addEventListener("keydown", (e) => {
@@ -1313,6 +1354,12 @@
     let savedSub = "digest";
     try { savedSub = localStorage.getItem("digestSub") || "digest"; } catch (e) { /* ignore */ }
     switchSub(savedSub);
+    // memory sub-tabs (Profile vs. growing memories)
+    document.querySelectorAll("#memory-subtabs .subtab").forEach((b) =>
+      b.addEventListener("click", () => switchMemorySub(b.dataset.sub)));
+    let savedMemSub = "memories";
+    try { savedMemSub = localStorage.getItem("memorySub") || "memories"; } catch (e) { /* ignore */ }
+    switchMemorySub(savedMemSub);
     // schedule
     $("d-parse").addEventListener("click", parseSchedule);
     $("d-push-cal").addEventListener("click", pushCalendar);

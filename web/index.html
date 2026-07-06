@@ -666,8 +666,13 @@
     <div class="view" id="view-memory" hidden>
       <section class="chips" id="memory-chips" aria-live="polite"></section>
 
+      <nav class="subtabs" id="memory-subtabs" role="tablist">
+        <button class="subtab active" type="button" data-sub="memories">Growing memories</button>
+        <button class="subtab" type="button" data-sub="profile">Profile</button>
+      </nav>
+
       <!-- PROFILE (base context, exempt from compression) -->
-      <section class="glass panel">
+      <section class="glass panel" data-group="profile">
         <div class="section-head">
           <h2>Profile &mdash; base context</h2>
           <span class="pill good">never compressed</span>
@@ -683,7 +688,7 @@
 
       <div class="grid">
         <!-- LEFT: add to memory -->
-        <section class="glass panel">
+        <section class="glass panel" data-group="memories">
           <div class="section-head">
             <h2>Teach it about you</h2>
             <span class="pill ghost">grows over time</span>
@@ -724,14 +729,19 @@
         </section>
 
         <!-- RIGHT: current memory -->
-        <section class="glass panel">
+        <section class="glass panel" data-group="memories">
           <div class="section-head">
             <h2>What it remembers</h2>
             <span class="pill ghost" id="m-count-pill">0 memories</span>
           </div>
-          <p class="hint">Memories evolve daily: recent, active items stay strong; older, low-importance ones fade and get compressed into the background. Sorted by importance.</p>
+          <p class="hint">Memories grow from your email reflections, resume, and notes; they evolve daily (recent/active items stay strong; old, low-importance ones fade and eventually compress into the background). This is the evolving memory - your permanent profile lives in "Profile - base context" above and is never compressed.</p>
           <div class="d-actions">
             <button class="btn-glass" id="m-evolve" type="button">Consolidate memory now</button>
+            <span class="m-sort" id="m-sort">
+              <span class="m-sort-label">Sort:</span>
+              <span class="m-sort-btn active" data-sort="importance">Importance</span>
+              <span class="m-sort-btn" data-sort="recent">Recent</span>
+            </span>
           </div>
           <div class="m-filter" id="m-filter"></div>
           <div class="m-list" id="m-list"></div>
