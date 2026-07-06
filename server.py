@@ -1004,6 +1004,14 @@ class Handler(BaseHTTPRequestHandler):
         if not isinstance(notes, str):
             notes = json.dumps(notes)
 
+        # Instructions are high-priority directives on HOW to edit (not new facts).
+        instructions = data.get("instructions") or ""
+        if not isinstance(instructions, str):
+            instructions = json.dumps(instructions)
+
+        # Fresh pass re-optimizes from the base profile, ignoring the converged draft.
+        fresh_pass = bool(data.get("fresh_pass"))
+
         # An optional PDF resume arrives base64-encoded.
         resume_pdf_bytes = None
         pdf_b64_in = data.get("resume_pdf_base64")
@@ -1024,6 +1032,8 @@ class Handler(BaseHTTPRequestHandler):
                 source_text=source_text,
                 resume_pdf_bytes=resume_pdf_bytes,
                 notes=notes,
+                instructions=instructions,
+                fresh_pass=fresh_pass,
                 deterministic=deterministic,
                 model=model,
                 do_compile=True,
@@ -1057,6 +1067,8 @@ class Handler(BaseHTTPRequestHandler):
             "gaps": result.gaps,
             "summary": result.summary,
             "notes_saved": result.notes_saved,
+            "diff": result.diff,
+            "changed": result.changed,
             "font_pt": result.font_pt,
             "textheight_extra": result.textheight_extra,
             "textwidth_extra": result.textwidth_extra,

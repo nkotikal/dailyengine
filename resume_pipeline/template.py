@@ -1,4 +1,8 @@
-"""Render the Jake Gutierrez resume template from a profile.
+"""Render the resume LaTeX from a profile.
+
+Attribution (kept here in the source; intentionally NOT emitted into the generated
+.tex output): the LaTeX preamble/macros are derived from Jake Gutierrez's resume
+template (https://github.com/sb2nov/resume), MIT License.
 
 The baseline preamble, custom macros, and section formatting are reproduced
 exactly as written. The only values that change are the explicitly-permitted
@@ -174,11 +178,8 @@ def render_skills(ordered_categories, density: Density) -> str:
 # --- full document ---------------------------------------------------------
 
 _DOC = r"""%-------------------------
-% Resume in Latex
-% Author : Jake Gutierrez
-% Based off of: https://github.com/sb2nov/resume
-% License : MIT
-%------------------------
+% Resume
+%-------------------------
 
 \documentclass[letterpaper,@@FONTPT@@pt]{article}
 

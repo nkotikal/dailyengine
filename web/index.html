@@ -133,6 +133,16 @@
           <button class="link-btn" id="paste-jd" type="button" data-target="jd">Paste from clipboard</button>
         </div>
 
+        <div class="section-head spaced">
+          <h2>Additional context / instructions</h2>
+          <span class="pill ghost">optional</span>
+        </div>
+        <p class="hint">Extra context or directives for the AI. This is also how you ask for changes on a regenerate, e.g. "emphasize CUDA &amp; compiler work", "make bullets more concise", "prioritize the AMD role", "target ML-infra roles". Truthful facts to add belong in Coverage gaps below; this is for how to shape the resume.</p>
+        <textarea id="instructions" class="field" placeholder="e.g. Emphasize GPU/CUDA and compiler execution with concrete impact; tighten the older roles to one line each."></textarea>
+        <div class="row-actions">
+          <button class="link-btn" id="paste-instructions" type="button" data-target="instructions">Paste from clipboard</button>
+        </div>
+
         <div class="options">
           <label class="select-wrap">
             <span>Model</span>
@@ -152,6 +162,14 @@
             <span>Offline mode</span>
             <span class="switch">
               <input type="checkbox" id="deterministic" />
+              <span class="track"><span class="thumb"></span></span>
+            </span>
+          </label>
+
+          <label class="switch-wrap" title="Re-optimize from your base profile instead of iterating the current draft. Use this if regenerations have converged and stopped changing.">
+            <span>Fresh pass</span>
+            <span class="switch">
+              <input type="checkbox" id="fresh-pass" />
               <span class="track"><span class="thumb"></span></span>
             </span>
           </label>
@@ -187,6 +205,11 @@
             <a class="btn-glass" id="download-pdf" download="resume.pdf">Download PDF</a>
             <a class="btn-glass subtle" id="download-tex" download="resume.tex">Download .tex</a>
             <button class="btn-glass subtle" id="toggle-tex" type="button">Edit LaTeX</button>
+            <button class="btn-glass subtle" id="toggle-diff" type="button" hidden>View changes <span id="diff-badge" class="diff-badge" hidden></span></button>
+          </div>
+          <div class="diff-wrap" id="diff-wrap" hidden>
+            <p class="hint">Git-style diff of your resume content vs. the previous version. <span class="diff-add-key">green</span> = added, <span class="diff-del-key">red</span> = removed.</p>
+            <pre class="diff-view mono" id="diff-view"></pre>
           </div>
           <div class="tex-editor-wrap" id="tex-editor-wrap" hidden>
             <p class="hint tex-hint">Edit the LaTeX below, then recompile. Changes apply to the PDF only — use Generate again to re-run the AI.</p>

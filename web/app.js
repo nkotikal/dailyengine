@@ -216,6 +216,9 @@ async function generate(opts) {
   }
   if (pendingPdfBase64) payload.resume_pdf_base64 = pendingPdfBase64;
   if (opts.notes) payload.notes = opts.notes;
+  const instructions = ($("instructions").value || "").trim();
+  if (instructions) payload.instructions = instructions;
+  if ($("fresh-pass").checked) payload.fresh_pass = true;
 
   setBusy(true, opts.fromGaps);
   try {
@@ -256,6 +259,8 @@ async function generate(opts) {
       summaryText.textContent = "";
       summaryBox.hidden = true;
     }
+
+    renderDiff(data.diff || "", data.changed, data.profile_source);
 
     // profile is now stored; clear the textarea so regenerate won't resend it
     if (data.profile_source === "parsed" || data.profile_source === "provided") {
@@ -453,6 +458,42 @@ async function onFile(e) {
   } catch (err) {
     showError("Could not read that file.");
   }
+}
+
+function renderDiff(diff, changed, profileSource) {
+  const btn = $("toggle-diff");
+  const wrap = $("diff-wrap");
+  const view = $("diff-view");
+  const badge = $("diff-badge");
+  if (!diff) {
+    btn.hidden = true;
+    wrap.hidden = true;
+    view.innerHTML = "";
+    // Only nudge on an iteration that produced no change (a common "it stopped
+    // making changes" case) - not on a first build.
+    if (changed === false && profileSource === "optimized") {
+      badge.hidden = true;
+      showError("No changes this run — the current draft already satisfies the request. "
+        + "Put a new instruction in \"Additional context / instructions\" (e.g. what to "
+        + "emphasize, shorten, or reorder) to change it.");
+    }
+    return;
+  }
+  let adds = 0, dels = 0;
+  const html = diff.split("\n").map((line) => {
+    if (line.startsWith("+++") || line.startsWith("---") || line.startsWith("@@")) {
+      return `<span class="diff-hunk">${escapeHtml(line)}</span>`;
+    }
+    if (line.startsWith("+")) { adds++; return `<span class="diff-add">${escapeHtml(line)}</span>`; }
+    if (line.startsWith("-")) { dels++; return `<span class="diff-del">${escapeHtml(line)}</span>`; }
+    return `<span class="diff-ctx">${escapeHtml(line)}</span>`;
+  }).join("\n");
+  view.innerHTML = html;
+  badge.hidden = false;
+  badge.innerHTML = `<span class="diff-badge-add">+${adds}</span> <span class="diff-badge-del">-${dels}</span>`;
+  btn.hidden = false;
+  wrap.hidden = false;  // auto-open so changes are immediately visible
+  $("toggle-diff").firstChild.textContent = "Hide changes ";
 }
 
 // ---- saved profile: view / edit / history ----
@@ -860,6 +901,11 @@ function init() {
     $("toggle-tex").textContent = wrap.hidden ? "Edit LaTeX" : "Hide LaTeX";
   });
   $("recompile-tex").addEventListener("click", recompileTex);
+  $("toggle-diff").addEventListener("click", () => {
+    const wrap = $("diff-wrap");
+    wrap.hidden = !wrap.hidden;
+    $("toggle-diff").firstChild.textContent = wrap.hidden ? "View changes " : "Hide changes ";
+  });
 
   // saved profile / history
   $("sp-refresh").addEventListener("click", loadSavedProfile);

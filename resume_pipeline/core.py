@@ -147,6 +147,59 @@ def _try_profile_json(text: str) -> Optional[dict]:
     return None
 
 
+def profile_to_text(profile: dict) -> str:
+    """A stable, human-readable rendering of a profile for diffing (density-agnostic).
+
+    Lists contact, education, skills, experience, and projects with their bullets in
+    a fixed order so a unified diff shows exactly which resume content changed.
+    """
+    if not isinstance(profile, dict):
+        return ""
+    lines = []
+    c = profile.get("contact") or {}
+    if isinstance(c, dict) and c.get("name"):
+        lines.append(f"# {c.get('name','')}")
+    for edu in profile.get("education") or []:
+        if isinstance(edu, dict):
+            lines.append(f"[Education] {edu.get('institution','')} - {edu.get('degree','')}"
+                         f" ({edu.get('dates','')})")
+    skills = profile.get("skills") or {}
+    if isinstance(skills, dict):
+        for cat, vals in skills.items():
+            vals = vals if isinstance(vals, (list, tuple)) else [vals]
+            lines.append(f"[Skills] {cat}: {', '.join(str(v) for v in vals)}")
+    for exp in profile.get("experience") or []:
+        if not isinstance(exp, dict):
+            continue
+        lines.append(f"[Experience] {exp.get('role','')} @ {exp.get('company','')}"
+                     f" ({exp.get('dates','')})")
+        for b in exp.get("bullets") or []:
+            lines.append(f"  - {b}")
+    for proj in profile.get("projects") or []:
+        if not isinstance(proj, dict):
+            continue
+        tech = proj.get("tech") or []
+        tech = ", ".join(tech) if isinstance(tech, (list, tuple)) else str(tech)
+        lines.append(f"[Project] {proj.get('title','')} ({tech})")
+        for b in proj.get("bullets") or []:
+            lines.append(f"  - {b}")
+    return "\n".join(lines)
+
+
+def _profile_diff(old: Optional[dict], new: dict) -> str:
+    """Unified diff of resume content between two profiles (empty if no change)."""
+    import difflib
+    old_text = profile_to_text(old) if old else ""
+    new_text = profile_to_text(new)
+    if old_text == new_text:
+        return ""
+    diff = difflib.unified_diff(
+        old_text.splitlines(), new_text.splitlines(),
+        fromfile="previous", tofile="current", lineterm="",
+    )
+    return "\n".join(diff)
+
+
 @dataclass
 class GenerateResult:
     tex: str
@@ -164,6 +217,8 @@ class GenerateResult:
     gaps: list = field(default_factory=list)
     summary: str = ""
     notes_saved: bool = False
+    diff: str = ""            # unified diff of resume content vs the previous draft
+    changed: bool = False     # whether this run changed the resume content
     warnings: list = field(default_factory=list)
 
 
@@ -228,6 +283,8 @@ def generate(
     source_text: str = "",
     resume_pdf_bytes: Optional[bytes] = None,
     notes: str = "",
+    instructions: str = "",
+    fresh_pass: bool = False,
     save_profile: bool = True,
     deterministic: bool = False,
     model: Optional[str] = None,
@@ -326,9 +383,11 @@ def generate(
         effective_context = "\n\n".join(p.strip() for p in parts if p and p.strip())
 
     # 4. Choose optimizer input: last optimized draft (iteration) or base profile.
+    #    A "fresh pass" deliberately ignores the converged draft and re-optimizes
+    #    from the base profile (+ context), which breaks out of iteration convergence.
     optimizer_input = profile
     is_iteration = False
-    if not profile_rebuilt and not resume_pdf_bytes and not raw_context:
+    if not fresh_pass and not profile_rebuilt and not resume_pdf_bytes and not raw_context:
         prev = store.load_optimized(optimized_path)
         if prev:
             optimizer_input = prev
@@ -351,15 +410,21 @@ def generate(
             job_description = "Target keywords / requirements:\n" + json.dumps(keywords, indent=2)
         if not job_description.strip():
             raise PipelineError("A job description is required for LLM optimization.")
+        prev_optimized = store.load_optimized(optimized_path)  # for the change diff
         profile, gaps, summary = llm.optimize_profile(
             optimizer_input, job_description, api_key=api_key, model=model,
             base_url=base_url, auth_style=auth_style, extra_context=effective_context,
-            is_iteration=is_iteration, new_notes=notes,
+            is_iteration=is_iteration, new_notes=notes, instructions=(instructions or "").strip(),
         )
         result.used_llm = True
         result.context_used = bool(effective_context.strip())
         result.gaps = gaps
         result.summary = summary
+        # Diff this draft against the previous one so the UI can show what changed.
+        # Only meaningful on an iteration (there is a prior draft to compare to).
+        if prev_optimized:
+            result.diff = _profile_diff(prev_optimized, profile)
+            result.changed = bool(result.diff)
         if save_profile:
             store.save_optimized(profile, optimized_path)
         weights = {}

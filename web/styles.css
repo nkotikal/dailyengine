@@ -650,6 +650,25 @@ textarea#jd { min-height: 190px; }
 .gaps-extra label { display: block; margin-bottom: 6px; }
 textarea#gaps-notes { min-height: 70px; }
 
+/* ----- change diff ----- */
+.diff-wrap { margin-top: 12px; }
+.diff-view {
+  max-height: 360px; overflow: auto; margin: 8px 0 0;
+  padding: 12px 14px; border-radius: var(--radius-sm);
+  background: rgba(0,0,0,0.38); border: 1px solid var(--glass-brd);
+  font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-break: break-word;
+}
+.diff-view span { display: block; }
+.diff-add { color: #7ee2b0; background: rgba(95,230,180,0.10); }
+.diff-del { color: #ff9aa8; background: rgba(255,143,156,0.10); }
+.diff-hunk { color: var(--accent); }
+.diff-ctx { color: var(--text-soft); }
+.diff-add-key { color: #7ee2b0; font-weight: 600; }
+.diff-del-key { color: #ff9aa8; font-weight: 600; }
+.diff-badge { font-size: 11px; }
+.diff-badge-add { color: #7ee2b0; font-weight: 700; }
+.diff-badge-del { color: #ff9aa8; font-weight: 700; }
+
 /* ----- saved profile & history ----- */
 #saved-profile-panel { margin-top: 22px; }
 .sp-editor { margin-top: 4px; }

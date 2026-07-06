@@ -70,6 +70,13 @@ OPTIMIZATION:
 - ATS: naturally weave in the job description's exact keywords and phrases wherever \
 they truthfully apply (in skills and bullets). Prefer standard terminology; spell \
 out acronyms once where it helps matching (e.g., "CI/CD (continuous integration)").
+- EXECUTION + IMPACT OVER BUZZWORDS: weight concrete technical execution and \
+measurable impact at least as highly as keyword coverage. Every bullet should show \
+WHAT was built/done (specific systems, techniques, tools) and the RESULT (a real \
+metric or outcome) - not just a pile of trendy terms. Keywords must ride on top of \
+substance, never replace it; a bullet that is only buzzwords with no execution or \
+impact is a failure. Keep enough exact keywords to pass the ATS scan, but a human \
+technical reviewer must see real engineering depth and results in every line.
 - Recruiter/hiring-manager: lead with the most relevant, highest-impact content. \
 Start bullets with strong action verbs. Keep each bullet concise (about one to two \
 lines). Order skills and bullets so the most job-relevant appear first. Reorder \
@@ -103,12 +110,20 @@ new notes were applied.
 brief clarifying question.
 - On regeneration passes, explicitly note what you preserved from the prior draft.
 
-ITERATION (when the input profile is a PRIOR OPTIMIZED DRAFT and/or NEW NOTES are present):
+ITERATION (when the input profile is a PRIOR OPTIMIZED DRAFT and/or NEW NOTES/INSTRUCTIONS are present):
 - Treat the input profile JSON as the current working draft the candidate already saw.
-- Preserve prior edits unless new notes explicitly override them or the JD demands a \
-truthful correction.
-- Integrate new notes without reverting unrelated bullets, ordering, or emphasis.
+- MINIMAL, TARGETED EDITS (edit like a careful code reviewer, not a rewriter): make \
+the SMALLEST set of changes that satisfies the candidate's INSTRUCTIONS, new notes, \
+and any truthful JD improvement. Change ONLY what those require.
+- Preserve the EXACT wording, ordering, and emphasis of every bullet/field the \
+request does not touch. Do NOT rephrase, reorder, or "improve" untouched content.
 - Do not "start over" from a blank-slate rewrite if a working draft is provided.
+- In the "summary", briefly list the specific bullets/fields you changed and why.
+
+USER INSTRUCTIONS (the highest-priority directives; may be empty):
+- If INSTRUCTIONS are provided, apply them directly (e.g. "emphasize CUDA", "make \
+bullets shorter", "prioritize the AMD role"), subject only to the truthfulness rules.
+- Instructions are directives about HOW to edit; they are not new resume facts.
 
 Return the optimized profile JSON (with "keywords", "gaps", and "summary") now."""
 
@@ -140,14 +155,15 @@ def _build_user_message(
     *,
     is_iteration: bool = False,
     new_notes: str = "",
+    instructions: str = "",
 ) -> str:
     parts = [
         "JOB DESCRIPTION:\n" + job_description.strip(),
     ]
     if is_iteration:
         parts.append(
-            "PRIOR OPTIMIZED DRAFT (current working version - build on this; "
-            "preserve edits unless new notes override):\n"
+            "PRIOR OPTIMIZED DRAFT (current working version - build on this; make "
+            "minimal targeted edits; preserve untouched content exactly):\n"
             + json.dumps(profile, ensure_ascii=False, indent=2)
         )
     else:
@@ -155,10 +171,15 @@ def _build_user_message(
             "CANDIDATE PROFILE JSON:\n"
             + json.dumps(profile, ensure_ascii=False, indent=2)
         )
+    if instructions and instructions.strip():
+        parts.append(
+            "USER INSTRUCTIONS (highest priority - how to edit; apply directly, "
+            "truthfully):\n" + instructions.strip()
+        )
     if new_notes and new_notes.strip():
         parts.append(
-            "NEW NOTES FROM CANDIDATE (apply truthfully; keep other prior edits):\n"
-            + new_notes.strip()
+            "NEW NOTES FROM CANDIDATE (truthful facts to incorporate; keep other "
+            "prior edits):\n" + new_notes.strip()
         )
     return "\n\n".join(parts)
 
@@ -330,6 +351,7 @@ def optimize_profile(
     extra_context: str = "",
     is_iteration: bool = False,
     new_notes: str = "",
+    instructions: str = "",
 ) -> tuple:
     """Return an LLM-optimized profile (same schema) for the given job description.
 
@@ -346,6 +368,7 @@ def optimize_profile(
 
     user = _build_user_message(
         profile, job_description, is_iteration=is_iteration, new_notes=new_notes,
+        instructions=instructions,
     )
     if extra_context and extra_context.strip():
         user += (
