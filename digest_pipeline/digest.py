@@ -10,8 +10,8 @@ from datetime import datetime, date
 
 import user_context
 
-from . import (email_send, english, gcal, inbox_commands, korean, llm, memory,
-               news, schedule, store, tasks, trackers)
+from . import (dayplan, email_send, english, gcal, inbox_commands, korean, llm,
+               memory, news, schedule, store, tasks, trackers)
 
 # Language practice tracks (the "korean_enabled" flag is the generic on/off switch).
 _LANG_META = {
@@ -142,6 +142,13 @@ def _korean_items(lesson: dict, practice: list | None = None) -> list:
     Every example shows the Korean and its English translation.
     """
     items = []
+    prog = (lesson or {}).get("weekly_progress") or {}
+    if prog.get("theme"):
+        items.append({"text": f"\U0001F4DA Weekly theme: {prog['theme']} \u2014 "
+                              f"{prog.get('completed',0)}/{prog.get('total',0)} words completed",
+                      "priority": "medium", "url": ""})
+    if (lesson or {}).get("challenge"):
+        items.append({"text": "\u2705 " + lesson["challenge"], "priority": "high", "url": ""})
     for v in (lesson or {}).get("vocab", []):
         rom = f" ({v['romanization']})" if v.get("romanization") else ""
         pos = f" [{v['pos']}]" if v.get("pos") else ""
@@ -373,6 +380,22 @@ def _deterministic_digest(cfg, updates, when_human, *, parsed_schedule=None,
     }
 
 
+def _dayplan_block(plan: dict, reply_subject: str) -> dict:
+    """A view model for the numbered, check-off-able 'Today's plan' card + mailto links."""
+    from urllib.parse import quote
+    to = email_send.from_address()
+    sc = dayplan.score(plan)
+    items = []
+    for t in plan.get("tasks", []):
+        body = f"done {t['idx']}"
+        mailto = f"mailto:{quote(to)}?subject={quote(reply_subject)}&body={quote(body)}" if to else ""
+        items.append({"idx": t["idx"], "text": t.get("text", ""),
+                      "priority": t.get("priority", "medium"),
+                      "annotation": t.get("annotation", ""),
+                      "done": bool(t.get("done")), "mailto": mailto})
+    return {"items": items, "score": sc}
+
+
 def _normalize(data: dict) -> dict:
     """Coerce arbitrary model/deterministic output into a safe, sorted structure."""
     if not isinstance(data, dict):
@@ -454,8 +477,14 @@ def build_digest(cfg: dict | None = None, *, when: datetime | None = None,
             except Exception:  # noqa: BLE001
                 pass
     elif consume and offline and inbox_commands.is_configured():
-        warnings.append("Offline: your email reply/reflection couldn't be incorporated "
-                        "and will be applied once the AI is back.")
+        # Still apply terse check-in replies (indices) without the LLM; prose
+        # reflections wait for a working AI.
+        try:
+            inbox_commands.process_replies(deterministic_only=True)
+        except Exception:  # noqa: BLE001
+            pass
+        warnings.append("Offline: quick check-in replies were applied; any written "
+                        "reflection will be incorporated once the AI is back.")
 
     updates = store.pending_updates()
     update_ids = [u["id"] for u in updates if u.get("id")]
@@ -637,6 +666,15 @@ def build_digest(cfg: dict | None = None, *, when: datetime | None = None,
     llm.set_active("anthropic", None)  # reset provider context after the run
     headline = data["headline"] or "Your daily digest"
     subject = f"\u2600\ufe0f Daily Digest \u2014 {when.strftime('%a, %b %d')}"
+
+    # Numbered, check-off-able plan for the accountability loop (only when the user
+    # has turned on check-ins or the recap). Built on a real send so indices are stable.
+    if consume and (cfg.get("checkins_enabled") or cfg.get("eod_recap_enabled")):
+        try:
+            plan = dayplan.build_day_plan(when, rebuild=True)
+            data["dayplan"] = _dayplan_block(plan, f"Re: {subject}")
+        except Exception:  # noqa: BLE001 - never let this break the send
+            pass
     return {
         "data": data,
         "html": render_html(data, when_human),
@@ -698,31 +736,41 @@ def _link(url: str, color: str) -> str:
 
 
 def render_html(data: dict, when_human: str) -> str:
-    """Inline-styled HTML email - colorful card layout, large type, single column."""
-    bg = "#0a0c18"
-    card = "#161a2e"
-    text = "#f1f4ff"
-    soft = "#c3c9de"
-    faint = "#828aa6"
+    """Inline-styled HTML email: one calm, unified card system.
+
+    Every section is a card with a colored left-accent bar and a clean header. Brief
+    sections read large and prominent; reference sections (schedule, tasks, language,
+    etc.) are quieter and smaller, below a subtle divider - so the eye lands on what
+    matters first and the rest stays available without shouting.
+    """
+    bg = "#0b0e1a"
+    card = "#141829"
+    brd = "#232842"
+    line = "rgba(255,255,255,0.06)"
+    text = "#eef1fb"
+    soft = "#aeb6d2"
+    faint = "#767f9e"
     fam = ("-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,"
            "sans-serif")
+    shadow = "0 4px 16px rgba(5,7,20,0.35)"
 
     parts = [
         f'<div style="margin:0;padding:0;background:{bg};">',
-        f'<div style="max-width:600px;margin:0 auto;padding:18px 14px 32px;'
+        f'<div style="max-width:600px;margin:0 auto;padding:16px 14px 30px;'
         f'font-family:{fam};">',
-        # decorative gradient header banner with a subtle pattern feel
-        f'<div style="background:linear-gradient(135deg,#6b7bff 0%,#9a6bff 50%,#ff7eb6 100%);'
-        f'border-radius:22px;padding:30px 24px;text-align:center;'
-        f'box-shadow:0 10px 30px rgba(124,109,255,0.35);">'
-        f'<div style="font-size:13px;letter-spacing:4px;text-transform:uppercase;'
-        f'color:rgba(255,255,255,0.9);font-weight:700;">\u2600\ufe0f  Daily Brief</div>'
-        f'<div style="font-size:23px;font-weight:800;color:#fff;margin-top:8px;'
+        # Slim gradient header; the greeting is folded in so the top isn't stacked.
+        f'<div style="background:linear-gradient(135deg,#5b6bf0,#8a5cf0);'
+        f'border-radius:20px;padding:22px 22px;box-shadow:0 8px 24px rgba(91,107,240,0.28);">'
+        f'<div style="font-size:11.5px;letter-spacing:3px;text-transform:uppercase;'
+        f'color:rgba(255,255,255,0.85);font-weight:700;">\u2600\ufe0f Daily Brief</div>'
+        f'<div style="font-size:22px;font-weight:800;color:#fff;margin-top:6px;'
         f'letter-spacing:-0.3px;">{_esc(when_human)}</div>'
-        f'<div style="margin-top:12px;font-size:20px;letter-spacing:6px;">'
-        f'\U0001F3AF \U0001F4F0 \U0001F4C5 \U0001F1F0\U0001F1F7</div></div>',
+        + (f'<div style="font-size:14.5px;line-height:1.5;color:rgba(255,255,255,0.9);'
+           f'margin-top:8px;">{_esc(data["greeting"])}</div>' if data.get("greeting") else "")
+        + '</div>',
     ]
-    # Conspicuous alert for reminders that are due today / overdue - right at the top.
+
+    # Conspicuous alert for reminders due today / overdue - the one loud element.
     alerts = data.get("reminder_alerts") or []
     if alerts:
         rows_html = []
@@ -733,47 +781,82 @@ def render_html(data: dict, when_human: str) -> str:
             else:
                 tag, tagbg = "TODAY", "#ff8f2e"
             due = x.get("due") or ""
+            due_html = (f" <span style='color:#ffd9d9;font-weight:600;font-size:13px;'>({_esc(due)})</span>"
+                        if due else "")
             rows_html.append(
-                f'<div style="display:flex;align-items:flex-start;gap:10px;'
-                f'padding:9px 0;border-top:1px solid rgba(255,255,255,0.14);">'
-                f'<span style="flex:0 0 auto;background:{tagbg};color:#1a0000;'
-                f'font-size:10.5px;font-weight:800;letter-spacing:.4px;padding:3px 8px;'
-                f'border-radius:6px;white-space:nowrap;">{_esc(tag)}</span>'
-                f'<span style="font-size:16px;line-height:1.5;color:#fff;font-weight:700;">'
-                f'{_esc(x.get("text",""))}'
-                f'{f" <span style=\'color:#ffd9d9;font-weight:600;font-size:13px;\'>({_esc(due)})</span>" if due else ""}'
-                f'</span></div>'
+                f'<div style="padding:8px 0;border-top:1px solid rgba(255,255,255,0.12);">'
+                f'<span style="background:{tagbg};color:#1a0000;font-size:10px;font-weight:800;'
+                f'letter-spacing:.4px;padding:2px 7px;border-radius:5px;margin-right:8px;'
+                f'white-space:nowrap;">{_esc(tag)}</span>'
+                f'<span style="font-size:15.5px;line-height:1.5;color:#fff;font-weight:700;">'
+                f'{_esc(x.get("text",""))}{due_html}</span></div>'
             )
         parts.append(
-            f'<div style="margin:16px 4px 4px;padding:16px 20px;border-radius:16px;'
-            f'background:linear-gradient(135deg,#3a0d18,#4a1220);border:2px solid #ff2d55;'
-            f'box-shadow:0 8px 26px rgba(255,45,85,0.35);">'
-            f'<div style="font-size:13px;letter-spacing:1.6px;text-transform:uppercase;'
-            f'color:#ff7a95;font-weight:800;margin-bottom:2px;">\u23F0 Reminders for today</div>'
+            f'<div style="margin:16px 2px 0;padding:14px 18px;border-radius:14px;'
+            f'background:#2a0e18;border:1px solid #ff2d55;">'
+            f'<div style="font-size:12px;letter-spacing:1.4px;text-transform:uppercase;'
+            f'color:#ff7a95;font-weight:800;margin-bottom:2px;">\u23F0 Due today</div>'
             + "".join(rows_html) + '</div>'
         )
+
     if data.get("motivation"):
         parts.append(
-            f'<div style="margin:16px 4px 4px;padding:16px 18px;border-radius:14px;'
-            f'background:linear-gradient(135deg,#1a1430,#241a2e);border-left:5px solid #ff7eb6;">'
-            f'<div style="font-size:18.5px;line-height:1.5;color:#fff;font-weight:800;'
-            f'font-style:italic;letter-spacing:-0.2px;">{_esc(data["motivation"])}</div></div>'
+            f'<div style="margin:16px 2px 0;padding:13px 16px;border-radius:12px;'
+            f'background:rgba(255,126,182,0.08);border-left:4px solid #ff7eb6;">'
+            f'<div style="font-size:16px;line-height:1.5;color:{text};font-weight:600;'
+            f'font-style:italic;">{_esc(data["motivation"])}</div></div>'
         )
-    if data.get("greeting"):
-        parts.append(
-            f'<p style="font-size:18px;line-height:1.6;color:{text};margin:18px 4px 8px;">'
-            f'{_esc(data["greeting"])}</p>'
-        )
+
     if data.get("headline"):
         parts.append(
-            f'<div style="background:linear-gradient(135deg,#2a2358,#1c2350);'
-            f'border-left:5px solid #8aa0ff;border-radius:14px;padding:18px 20px;'
-            f'margin:14px 4px 24px;box-shadow:0 6px 20px rgba(20,16,50,0.5);">'
-            f'<div style="font-size:11px;letter-spacing:1.4px;text-transform:uppercase;'
-            f'color:#8aa0ff;font-weight:800;margin-bottom:6px;">\u2b50 Top priority today</div>'
-            f'<div style="font-size:19px;line-height:1.5;color:#fff;font-weight:700;">'
+            f'<div style="background:{card};border:1px solid {brd};border-left:4px solid #8aa0ff;'
+            f'border-radius:14px;padding:15px 18px;margin:16px 2px 4px;box-shadow:{shadow};">'
+            f'<div style="font-size:10.5px;letter-spacing:1.4px;text-transform:uppercase;'
+            f'color:#8aa0ff;font-weight:800;margin-bottom:5px;">\u2b50 Top priority</div>'
+            f'<div style="font-size:18px;line-height:1.5;color:#fff;font-weight:700;">'
             f'{_esc(data["headline"])}</div></div>'
         )
+
+    # Numbered "Today's plan" card (accountability loop): tap [✓ done] or reply "done N".
+    dp = data.get("dayplan")
+    if dp and dp.get("items"):
+        sc = dp.get("score", {})
+        rows = []
+        for it in dp["items"]:
+            if it.get("done"):
+                mark = '\u2705'
+                tstyle = f'color:{faint};text-decoration:line-through;'
+                quick = ""
+            else:
+                mark = (f'<span style="display:inline-block;min-width:20px;color:{soft};'
+                        f'font-weight:800;">{it["idx"]}.</span>')
+                tstyle = f'color:{text};font-weight:600;'
+                quick = (f' <a href="{_esc(it["mailto"])}" style="color:#34d399;font-size:12px;'
+                         f'font-weight:700;text-decoration:none;white-space:nowrap;">[\u2713 done]</a>'
+                         if it.get("mailto") else "")
+            flag = ("\u203c\ufe0f " if it["priority"] == "critical"
+                    else ("\u2b50 " if it["priority"] == "high" else ""))
+            ann = (f' <span style="color:{faint};font-size:12.5px;">({_esc(it["annotation"])})</span>'
+                   if it.get("annotation") else "")
+            rows.append(
+                f'<div style="padding:7px 0;border-top:1px solid {line};">'
+                f'<span style="display:inline-block;width:24px;">{mark}</span>'
+                f'<span style="font-size:15px;line-height:1.5;{tstyle}">{flag}{_esc(it["text"])}</span>'
+                f'{ann}{quick}</div>')
+        parts.append(
+            f'<div style="background:{card};border:1px solid {brd};border-left:4px solid #34d399;'
+            f'border-radius:14px;padding:14px 18px;margin:16px 2px 4px;box-shadow:{shadow};">'
+            f'<div style="margin-bottom:6px;"><span style="font-size:16px;font-weight:800;'
+            f'color:{text};">\u2705 Today\u2019s plan</span>'
+            f'<span style="float:right;font-size:12.5px;color:{soft};font-weight:700;">'
+            f'{sc.get("done",0)}/{sc.get("count",0)} \u00b7 {sc.get("total",0)} pts</span></div>'
+            + "".join(rows)
+            + f'<div style="margin-top:9px;font-size:12.5px;color:{faint};line-height:1.5;">'
+            f'Reply <strong style="color:{soft};">done 1 3</strong> as you finish. '
+            f'I\u2019ll check in later and total your score.</div></div>')
+
+    # A little breathing room before the section stack.
+    parts.append('<div style="height:6px;"></div>')
 
     detail_started = False
     for sec in data.get("sections", []):
@@ -785,28 +868,29 @@ def render_html(data: dict, when_human: str) -> str:
 
         if is_detail and not detail_started:
             detail_started = True
+            # Subtle "label on a line" divider between the brief and the reference zone.
             parts.append(
-                f'<div style="margin:28px 4px 14px;text-align:center;font-size:11px;'
-                f'letter-spacing:3px;text-transform:uppercase;color:{faint};font-weight:700;">'
-                f'\u2022 \u2022 \u2022 &nbsp; the granular day &nbsp; \u2022 \u2022 \u2022</div>'
+                f'<div style="margin:24px 6px 14px;border-top:1px solid {brd};line-height:0;">'
+                f'<span style="display:inline-block;background:{bg};padding:0 12px;'
+                f'position:relative;top:-8px;font-size:10px;letter-spacing:2.5px;'
+                f'text-transform:uppercase;color:{faint};font-weight:700;">for reference</span></div>'
             )
 
-        # Schedule: a clean, time-chunked layout (grouped by hour) instead of a flat list.
+        # Schedule: a clean, time-chunked layout (grouped by hour).
         if sec.get("kind") == "schedule":
             parts.append(
-                f'<div style="background:{card};border:1px solid #2a2f4d;border-radius:16px;'
-                f'padding:16px 18px 8px;margin:0 4px 16px;box-shadow:0 6px 18px rgba(8,10,30,0.4);">'
-                f'<div style="font-size:15px;font-weight:800;letter-spacing:.4px;'
-                f'text-transform:uppercase;color:{color};margin-bottom:12px;">'
-                f'{_badge(icon, tint)}{_esc(title)}</div>'
+                f'<div style="background:{card};border:1px solid {brd};border-left:3px solid {color};'
+                f'border-radius:12px;padding:14px 16px 8px;margin:0 2px 12px;">'
+                f'<div style="font-size:12.5px;font-weight:800;letter-spacing:.5px;'
+                f'text-transform:uppercase;color:{color};margin-bottom:10px;">'
+                f'{_esc(icon)} {_esc(title)}</div>'
             )
             for blk in sec.get("blocks", []):
                 parts.append(
-                    f'<div style="display:flex;gap:12px;padding:8px 0;'
-                    f'border-top:1px solid rgba(255,255,255,0.06);">'
-                    f'<div style="flex:0 0 62px;">'
-                    f'<span style="display:inline-block;background:{color};color:#0a0c18;'
-                    f'font-size:11.5px;font-weight:800;padding:3px 8px;border-radius:7px;'
+                    f'<div style="display:flex;gap:12px;padding:7px 0;border-top:1px solid {line};">'
+                    f'<div style="flex:0 0 58px;">'
+                    f'<span style="display:inline-block;background:{color};color:#0b0e1a;'
+                    f'font-size:11px;font-weight:800;padding:3px 8px;border-radius:6px;'
                     f'white-space:nowrap;">{_esc(blk.get("time", ""))}</span></div>'
                     f'<div style="flex:1 1 auto;">'
                 )
@@ -814,14 +898,14 @@ def render_html(data: dict, when_human: str) -> str:
                     mark = ("\u203c\ufe0f " if t["priority"] == "critical"
                             else ("\u2b50 " if t["priority"] == "high" else ""))
                     parts.append(
-                        f'<div style="font-size:15px;line-height:1.5;color:{text};'
+                        f'<div style="font-size:14.5px;line-height:1.5;color:{text};'
                         f'font-weight:600;margin:0 0 2px;">{mark}{_esc(t["text"])}</div>'
                     )
                     for s in t.get("subs", []):
                         smark = ("\u203c\ufe0f " if s["priority"] == "critical"
                                  else ("\u2b50 " if s["priority"] == "high" else "\u00b7 "))
                         parts.append(
-                            f'<div style="font-size:13.5px;line-height:1.45;color:{soft};'
+                            f'<div style="font-size:13px;line-height:1.45;color:{soft};'
                             f'margin:1px 0 1px 6px;">{smark}{_esc(s["text"])}</div>'
                         )
                 parts.append('</div></div>')
@@ -829,66 +913,65 @@ def render_html(data: dict, when_human: str) -> str:
             continue
 
         if is_detail:
-            # Colored (not gray) compact card.
+            # Quiet reference card: muted, smaller, same left-accent language.
             parts.append(
-                f'<div style="background:{tint};border-left:4px solid {color};'
-                f'border-radius:12px;padding:14px 16px;margin:0 4px 12px;">'
-                f'<div style="font-size:14.5px;font-weight:800;letter-spacing:.4px;'
-                f'text-transform:uppercase;color:{color};margin-bottom:9px;">'
-                f'{_badge(icon, "rgba(255,255,255,0.10)")}{_esc(title)}</div>'
+                f'<div style="background:rgba(255,255,255,0.02);border:1px solid {line};'
+                f'border-left:3px solid {color};border-radius:12px;padding:12px 15px;margin:0 2px 10px;">'
+                f'<div style="font-size:12px;font-weight:800;letter-spacing:.5px;'
+                f'text-transform:uppercase;color:{color};margin-bottom:8px;">'
+                f'{_esc(icon)} {_esc(title)}</div>'
             )
+            if sec.get("summary"):
+                parts.append(
+                    f'<p style="font-size:13.5px;line-height:1.6;color:{soft};margin:0 0 '
+                    f'{"8px" if sec.get("items") else "0"};">{_esc(sec["summary"])}</p>')
             for it in sec.get("items", []):
                 parts.append(
-                    f'<div style="font-size:14.5px;line-height:1.55;color:{soft};'
-                    f'margin:0 0 5px;padding-left:2px;">{_esc(it.get("text"))}'
-                    f'{_link(it.get("url"), color)}</div>'
+                    f'<div style="font-size:13.5px;line-height:1.55;color:{soft};'
+                    f'margin:0 0 4px;">{_esc(it.get("text"))}{_link(it.get("url"), color)}</div>'
                 )
             parts.append('</div>')
             continue
 
-        # Brief sections: prominent colorful card with tinted header + badge.
+        # Brief section: prominent left-accent card with a clean badge header.
         parts.append(
-            f'<div style="background:{card};border:1px solid #2a2f4d;border-radius:18px;'
-            f'padding:0;margin:0 4px 18px;overflow:hidden;'
-            f'box-shadow:0 6px 18px rgba(8,10,30,0.4);">'
-            f'<div style="background:{tint};padding:14px 18px;border-bottom:1px solid #2a2f4d;'
-            f'font-size:18px;font-weight:800;color:{text};">'
-            f'{_badge(icon, "rgba(255,255,255,0.12)")}{_esc(title)}</div>'
-            f'<div style="padding:16px 18px 18px;">'
+            f'<div style="background:{card};border:1px solid {brd};border-left:4px solid {color};'
+            f'border-radius:14px;padding:15px 18px;margin:0 2px 14px;box-shadow:{shadow};">'
+            f'<div style="margin-bottom:10px;">{_badge(icon, tint)}'
+            f'<span style="font-size:16.5px;font-weight:800;color:{color};'
+            f'vertical-align:middle;">{_esc(title)}</span></div>'
         )
         if sec.get("summary"):
             parts.append(
-                f'<p style="font-size:16.5px;line-height:1.7;color:{text};margin:0 0 '
-                f'{"14px" if sec.get("items") else "0"};">{_esc(sec["summary"])}</p>'
+                f'<p style="font-size:15.5px;line-height:1.65;color:{text};margin:0 0 '
+                f'{"12px" if sec.get("items") else "0"};">{_esc(sec["summary"])}</p>'
             )
         for it in sec.get("items", []):
             dot = PRIORITY_COLOR.get(it.get("priority", "medium"), color)
             parts.append(
-                f'<div style="margin:0 0 11px;padding-left:18px;position:relative;'
-                f'border-left:0;">'
-                f'<span style="display:inline-block;width:9px;height:9px;border-radius:50%;'
+                f'<div style="margin:0 0 8px;">'
+                f'<span style="display:inline-block;width:8px;height:8px;border-radius:50%;'
                 f'background:{dot};margin:0 10px 1px 0;vertical-align:middle;"></span>'
-                f'<span style="font-size:16px;line-height:1.55;color:{text};">'
+                f'<span style="font-size:15px;line-height:1.55;color:{text};">'
                 f'{_esc(it.get("text"))}{_link(it.get("url"), color)}</span></div>'
             )
-        parts.append('</div></div>')
+        parts.append('</div>')
 
     if data.get("closing"):
         parts.append(
-            f'<p style="font-size:16.5px;line-height:1.6;color:{soft};margin:22px 4px 8px;'
+            f'<p style="font-size:15px;line-height:1.6;color:{soft};margin:20px 4px 8px;'
             f'font-style:italic;">{_esc(data["closing"])}</p>'
         )
     parts.append(
-        f'<div style="margin:22px 4px 0;padding:16px 18px;'
-        f'background:linear-gradient(135deg,rgba(124,155,255,0.12),rgba(192,140,255,0.12));'
-        f'border:1px solid #2a2f4d;border-radius:14px;font-size:14.5px;line-height:1.65;'
-        f'color:{soft};">\U0001F4AC <strong style="color:{text};">Reply to this email</strong> '
-        f'to update anything - e.g. "finished the MAD-private PR", "add: book flights by Friday", '
-        f'"more compilers, less crypto". I\'ll fold it into tomorrow\'s brief.</div>'
+        f'<div style="margin:20px 2px 0;padding:14px 16px;background:rgba(124,155,255,0.08);'
+        f'border:1px solid {brd};border-radius:12px;font-size:13.5px;line-height:1.6;'
+        f'color:{soft};">\U0001F4AC <strong style="color:{text};">Reply</strong> to update anything '
+        f'\u2014 "finished the PR", "add: book flights by Friday", "more compilers, less crypto". '
+        f'It shapes tomorrow\u2019s brief.</div>'
     )
     parts.append(
-        f'<div style="text-align:center;color:{faint};font-size:12px;margin:18px 6px 4px;">'
-        f'\u2728 Your personal Daily Digest \u00b7 reply anytime \u2728</div>'
+        f'<div style="text-align:center;color:{faint};font-size:11.5px;margin:16px 6px 4px;">'
+        f'Daily Digest \u00b7 reply anytime</div>'
     )
     parts.append("</div></div>")
     return "".join(parts)
@@ -911,6 +994,18 @@ def render_text(data: dict, when_human: str) -> str:
         lines += [data["greeting"], ""]
     if data.get("headline"):
         lines += [f"** {data['headline']} **", ""]
+    dp = data.get("dayplan")
+    if dp and dp.get("items"):
+        sc = dp.get("score", {})
+        lines.append(f"TODAY'S PLAN  ({sc.get('done',0)}/{sc.get('count',0)} done, "
+                     f"{sc.get('total',0)} pts)")
+        lines.append("-" * 40)
+        for it in dp["items"]:
+            box = "[x]" if it.get("done") else f"{it['idx']}."
+            flag = "!! " if it["priority"] == "critical" else ("* " if it["priority"] == "high" else "")
+            ann = f"  ({it['annotation']})" if it.get("annotation") else ""
+            lines.append(f"  {box} {flag}{it['text']}{ann}")
+        lines += ["", "Reply 'done 1 3' as you finish (or say it in words).", ""]
     for sec in data.get("sections", []):
         icon = (sec.get("icon") or "").strip()
         lines.append(f"{icon + ' ' if icon else ''}{sec.get('title','').upper()}")

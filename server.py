@@ -33,6 +33,7 @@ from digest_pipeline import schedule as digest_schedule
 from digest_pipeline import trackers as digest_trackers
 from digest_pipeline import korean as digest_korean
 from digest_pipeline import english as digest_english
+from digest_pipeline import dayplan as digest_dayplan
 from digest_pipeline import gcal as digest_gcal
 from digest_pipeline import memory as digest_memory
 from digest_pipeline import tasks as digest_tasks
@@ -442,6 +443,18 @@ class Handler(BaseHTTPRequestHandler):
                 "progress": (digest_english.progress_summary(digest_store.load_english())
                              if (cfg.get("language") or "korean") == "english"
                              else digest_korean.progress_summary(digest_store.load_korean())),
+                "weekly": digest_korean.weekly_progress(digest_store.load_korean()),
+                "practice": digest_korean.practice_stats(digest_store.load_korean()),
+            },
+            "accountability": {
+                "checkins_enabled": cfg.get("checkins_enabled", False),
+                "checkin_times": cfg.get("checkin_times", []),
+                "eod_recap_enabled": cfg.get("eod_recap_enabled", False),
+                "eod_recap_time": cfg.get("eod_recap_time", "21:00"),
+                "today": digest_dayplan.score(digest_dayplan.get_day_plan()),
+                "week": digest_dayplan.week_summary(),
+                "weeks": digest_dayplan.recent_weeks(n=6),
+                "leaderboard": digest_dayplan.leaderboard(),
             },
             "state": {
                 "last_sent_date": state.get("last_sent_date", ""),
@@ -708,13 +721,20 @@ class Handler(BaseHTTPRequestHandler):
             digest_store.save_config({"weekly_goals": weekly_text})
         cfg = digest_store.load_config()
         use_llm = not bool(cfg.get("offline"))
+        replace = bool(data.get("replace"))
         try:
-            result = digest_tasks.derive_and_merge(
-                weekly_text, model=(cfg.get("model") or None), use_llm=use_llm)
+            if replace:
+                result = digest_tasks.derive_and_replace(
+                    weekly_text, model=(cfg.get("model") or None), use_llm=use_llm)
+            else:
+                result = digest_tasks.derive_and_merge(
+                    weekly_text, model=(cfg.get("model") or None), use_llm=use_llm)
         except Exception as exc:  # noqa: BLE001
             self._send_json(500, {"ok": False, "error": f"{type(exc).__name__}: {exc}"})
             return
         self._send_json(200, {"ok": True, "added": result["added"],
+                              "removed": result.get("removed", 0),
+                              "replaced": replace, "error_note": result.get("error", ""),
                               "tasks": result["tasks"], "summary": digest_tasks.summary()})
 
     def _tasks_add(self):

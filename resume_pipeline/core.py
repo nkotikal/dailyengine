@@ -174,7 +174,9 @@ def profile_to_text(profile: dict) -> str:
         lines.append(f"[Experience] {exp.get('role','')} @ {exp.get('company','')}"
                      f" ({exp.get('dates','')})")
         for b in exp.get("bullets") or []:
-            lines.append(f"  - {b}")
+            bt = b.get("text", "") if isinstance(b, dict) else b
+            pin = " [pinned]" if isinstance(b, dict) and b.get("pinned") else ""
+            lines.append(f"  - {bt}{pin}")
     for proj in profile.get("projects") or []:
         if not isinstance(proj, dict):
             continue
@@ -182,7 +184,9 @@ def profile_to_text(profile: dict) -> str:
         tech = ", ".join(tech) if isinstance(tech, (list, tuple)) else str(tech)
         lines.append(f"[Project] {proj.get('title','')} ({tech})")
         for b in proj.get("bullets") or []:
-            lines.append(f"  - {b}")
+            bt = b.get("text", "") if isinstance(b, dict) else b
+            pin = " [pinned]" if isinstance(b, dict) and b.get("pinned") else ""
+            lines.append(f"  - {bt}{pin}")
     return "\n".join(lines)
 
 

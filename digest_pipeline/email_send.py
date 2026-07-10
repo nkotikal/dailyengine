@@ -38,6 +38,11 @@ def is_configured() -> bool:
     return bool(c["host"] and c["from_addr"])
 
 
+def from_address() -> str:
+    """The address replies come back to (used to build one-tap mailto: links)."""
+    return _cfg()["from_addr"]
+
+
 def config_summary() -> dict:
     """Non-sensitive view of the email setup for the UI."""
     c = _cfg()

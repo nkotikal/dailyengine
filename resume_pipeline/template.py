@@ -55,6 +55,28 @@ def _bullets(entry: dict):
     return list(val) if isinstance(val, (list, tuple)) else [str(val)]
 
 
+def bullet_text(b) -> str:
+    """A bullet may be a plain string or a {text, pinned} object."""
+    if isinstance(b, dict):
+        return str(b.get("text", "")).strip()
+    return str(b).strip()
+
+
+def bullet_pinned(b) -> bool:
+    return bool(b.get("pinned")) if isinstance(b, dict) else False
+
+
+def _keep_bullets(bullets, cap, weights):
+    """Return kept bullets (original order) honoring pins: pinned bullets are ALWAYS
+    kept; the remaining slots go to the highest-ranked non-pinned bullets."""
+    pinned = [b for b in bullets if bullet_pinned(b)]
+    rest = [b for b in bullets if not bullet_pinned(b)]
+    ranked = tailor.rank_items(rest, bullet_text, weights)
+    keep_rest = [b for b, _ in ranked[:max(0, cap - len(pinned))]]
+    keep_ids = {id(b) for b in pinned} | {id(b) for b in keep_rest}
+    return [b for b in bullets if id(b) in keep_ids]  # preserve original order
+
+
 # --- section renderers -----------------------------------------------------
 
 def render_heading(contact: dict) -> str:
@@ -100,7 +122,7 @@ def _resume_subheading(a, b, c, d) -> str:
 def _item_list(bullets) -> str:
     lines = ["      \\resumeItemListStart"]
     for b in bullets:
-        lines.append("        \\resumeItem{%s}" % escape_latex(b))
+        lines.append("        \\resumeItem{%s}" % escape_latex(bullet_text(b)))
     lines.append("      \\resumeItemListEnd")
     return "\n".join(lines)
 
@@ -126,9 +148,8 @@ def render_experience(experience, density: Density, weights: dict) -> str:
         loc = _first(entry, "location")
         role = _first(entry, "role", "title", "position")
         dates = _first(entry, "dates", "date")
-        ranked = tailor.rank_items(_bullets(entry), lambda b: str(b), weights)
         cap = density.keep_recent if idx == 0 else density.keep_older
-        kept = [b for b, _ in ranked[:cap]]
+        kept = _keep_bullets(_bullets(entry), cap, weights)
         block = _resume_subheading(company, loc, role, dates)
         if kept:
             block += "\n" + _item_list(kept)
@@ -151,8 +172,7 @@ def render_projects(projects, density: Density, weights: dict) -> str:
             escape_latex(tech_str),
             escape_latex(dates),
         )
-        ranked = tailor.rank_items(_bullets(entry), lambda b: str(b), weights)
-        kept = [b for b, _ in ranked[: density.keep_project]]
+        kept = _keep_bullets(_bullets(entry), density.keep_project, weights)
         if kept:
             heading += "\n" + _item_list(kept)
         blocks.append(heading)

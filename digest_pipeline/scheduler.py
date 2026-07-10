@@ -10,7 +10,7 @@ import threading
 import time
 from datetime import datetime
 
-from . import digest
+from . import checkins, digest
 
 _thread = None
 _stop = threading.Event()
@@ -18,10 +18,16 @@ _stop = threading.Event()
 
 def _loop(interval: int):
     while not _stop.wait(interval):
+        now = datetime.now()
         try:
             # Multi-user: send each user's digest when their own send time is due.
-            digest.run_scheduled_for_all_users(datetime.now())
+            digest.run_scheduled_for_all_users(now)
         except Exception:  # noqa: BLE001 - never let the loop die
+            pass
+        try:
+            # Progress check-ins + end-of-day recap (opt-in, after the morning brief).
+            checkins.run_interactivity_for_all_users(now)
+        except Exception:  # noqa: BLE001
             pass
 
 

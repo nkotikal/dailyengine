@@ -13,15 +13,22 @@ State (persisted by store.load_korean / store.save_korean):
   seen_vocab / seen_grammar / history       -> de-dup + record
 """
 
+import random
 from datetime import datetime, timedelta
 
 from . import korean_curriculum as cur
 from . import llm
 
-N_NEW_VOCAB = 5
+N_NEW_VOCAB = 3          # vocab words served per day (from the weekly theme)
 N_NEW_GRAMMAR = 1
-MAX_REVIEWS = 6
+MAX_REVIEWS = 4
 SRS_INTERVALS = [1, 3, 7, 16, 35, 75, 150]  # days; index by reps
+
+# --- weekly themed vocab ---------------------------------------------------
+WEEKLY_WORDS = 15        # unique words in a week's theme (7 days x 3 = 21 slots -> ~6 repeats)
+POOL_CANDIDATES = 40     # unlearned words offered to the theme picker
+REVIEW_WEEK_PROB = 0.4   # chance a week sprinkles in a couple of past-theme words
+REVIEW_WORDS_WHEN_ON = 2 # how many past words to sprinkle when it does
 
 
 SYSTEM_PROMPT = """\
@@ -64,6 +71,243 @@ RULES:
 
 def _today():
     return datetime.now().strftime("%Y-%m-%d")
+
+
+# ===========================================================================
+# Weekly themed vocabulary
+#
+# Each week (starting Sunday) has a THEME and 15 words drawn from the curriculum
+# list (plus, occasionally, a few review words from past weeks). Words are served
+# 3/day across 7 days (21 slots), so ~6 are repeated for reinforcement. Repeats are
+# mostly random but biased toward words the learner has been shown yet not COMPLETED
+# (completion = replying with your own example sentence for the word). All 15
+# completed = the week is done.
+# ===========================================================================
+
+THEME_SYSTEM = """\
+You are a Korean tutor assembling a THEMED weekly vocabulary set for a TOPIK II
+learner. You are given a CANDIDATE POOL of Korean words (with meanings) and,
+optionally, some MUST-INCLUDE review words. Choose ONE coherent theme and select
+EXACTLY the requested number of words that best fit it, chosen ONLY from the pool
+(plus all MUST-INCLUDE words). Respond with ONLY a JSON object:
+
+{ "theme": "a short theme name",
+  "words": [ {"korean": "...", "english": "...", "pos": "..."} ] }
+
+RULES:
+- Use ONLY words from the provided pool (plus every MUST-INCLUDE word). Do not invent.
+- Return EXACTLY the requested count. Keep the English meanings accurate.
+- Prefer a theme that groups as many pool words as naturally as possible."""
+
+
+def _week_start(today_str: str) -> str:
+    """The Sunday on/before the given date (weeks start Sunday)."""
+    d = datetime.strptime(today_str, "%Y-%m-%d").date()
+    offset = (d.weekday() + 1) % 7   # Mon=0..Sun=6 -> Sunday=0
+    return (d - timedelta(days=offset)).strftime("%Y-%m-%d")
+
+
+def _pick_review_words(state: dict, week_start: str, unlearned_count: int) -> list:
+    """Occasionally choose a few words from PAST themes for cross-week reinforcement.
+
+    Deterministic per week (seeded by week_start). Prefers words that were never
+    completed. Also used to backfill if the unlearned pool is short of 15.
+    """
+    history = state.get("weekly_history", [])
+    if not history:
+        return []
+    rng = random.Random("rev-" + week_start)
+    # Flatten past words, preferring never-completed ones; dedup by korean.
+    missed, done = [], []
+    seen = set()
+    for wk in history:
+        status = wk.get("status", {})
+        for w in wk.get("words", []):
+            ko = w.get("korean")
+            if not ko or ko in seen:
+                continue
+            seen.add(ko)
+            (missed if not status.get(ko, {}).get("completed") else done).append(w)
+    rng.shuffle(missed)
+    rng.shuffle(done)
+    ordered = missed + done
+
+    want = 0
+    if rng.random() < REVIEW_WEEK_PROB:
+        want = REVIEW_WORDS_WHEN_ON
+    # Backfill if we don't have enough brand-new words to fill the week.
+    want = max(want, WEEKLY_WORDS - unlearned_count)
+    return ordered[:max(0, min(want, len(ordered)))]
+
+
+def pick_weekly_theme(state: dict, week_start: str, *, model=None, offline=False) -> dict:
+    """Choose this week's theme + 15 words (mostly new, occasionally review words)."""
+    seen_v = set(state.get("seen_vocab", []))
+    unlearned = [w for w in cur.VOCAB_SEED if w["korean"] not in seen_v]
+    review_words = _pick_review_words(state, week_start, len(unlearned))
+    review_kos = {w["korean"] for w in review_words}
+    n_new = max(0, WEEKLY_WORDS - len(review_words))
+    pool = [w for w in unlearned if w["korean"] not in review_kos]
+
+    def _offline():
+        words = review_words + pool[:n_new]
+        # If still short (curriculum nearly exhausted), reuse from full deck.
+        if len(words) < WEEKLY_WORDS:
+            extra = [w for w in cur.VOCAB_SEED
+                     if w["korean"] not in {x["korean"] for x in words}]
+            words += extra[:WEEKLY_WORDS - len(words)]
+        return {"theme": "Weekly vocabulary set", "words": words[:WEEKLY_WORDS]}
+
+    if offline or not llm.have_key() or not pool:
+        return _offline()
+
+    candidates = pool[:POOL_CANDIDATES]
+    pool_txt = "\n".join(f"- {w['korean']} ({w['english']}; {w['pos']})" for w in candidates)
+    must_txt = ("\n".join(f"- {w['korean']} ({w['english']})" for w in review_words)
+                or "(none)")
+    user = (f"Select EXACTLY {WEEKLY_WORDS} words.\n\n"
+            f"MUST-INCLUDE review words ({len(review_words)}):\n{must_txt}\n\n"
+            f"CANDIDATE POOL:\n{pool_txt}")
+    try:
+        data = llm.post_json(THEME_SYSTEM, user, model=model, temperature=0.5, max_tokens=1200)
+    except llm.DigestLLMError:
+        return _offline()
+
+    valid = {w["korean"]: w for w in cur.VOCAB_SEED}
+    for w in review_words:
+        valid.setdefault(w["korean"], w)
+    words, chosen = [], set()
+    for w in (data.get("words") or []):
+        ko = str((w or {}).get("korean", "")).strip()
+        if ko in valid and ko not in chosen:
+            words.append(valid[ko]); chosen.add(ko)
+    # Ensure review words are present and top up to 15 from the pool if needed.
+    for w in review_words:
+        if w["korean"] not in chosen:
+            words.append(w); chosen.add(w["korean"])
+    for w in pool:
+        if len(words) >= WEEKLY_WORDS:
+            break
+        if w["korean"] not in chosen:
+            words.append(w); chosen.add(w["korean"])
+    if len(words) < WEEKLY_WORDS:
+        return _offline()
+    theme = str(data.get("theme") or "Weekly vocabulary set").strip() or "Weekly vocabulary set"
+    return {"theme": theme, "words": words[:WEEKLY_WORDS]}
+
+
+def ensure_week(state: dict, today: str, *, model=None, offline=False) -> bool:
+    """Roll over to a new weekly theme if we've crossed into a new week. Returns True if rolled."""
+    ws = _week_start(today)
+    weekly = state.get("weekly") or {}
+    if weekly.get("week_start") == ws and weekly.get("words"):
+        return False
+    # Archive the finished week for cross-week reinforcement + history.
+    if weekly.get("words"):
+        state.setdefault("weekly_history", []).append(weekly)
+        state["weekly_history"] = state["weekly_history"][-52:]  # ~1 year
+    chosen = pick_weekly_theme(state, ws, model=model, offline=offline)
+    status = {w["korean"]: {"shown_count": 0, "shown_days": [], "completed": False,
+                            "completed_date": ""} for w in chosen["words"]}
+    # Mark the newly-introduced words as seen so future weeks don't repeat them
+    # (except intentional review sprinkles).
+    seen_v = state.setdefault("seen_vocab", [])
+    for w in chosen["words"]:
+        if w["korean"] not in seen_v:
+            seen_v.append(w["korean"])
+    state["weekly"] = {
+        "week_start": ws, "theme": chosen["theme"], "words": chosen["words"],
+        "status": status, "day_slots": {},
+    }
+    return True
+
+
+def select_day_words(state: dict, today: str) -> list:
+    """Pick today's 3 theme words: coverage-first, with missed-weighted repeats sprinkled.
+
+    Idempotent per day (records/returns the same slots if already chosen today).
+    """
+    weekly = state.get("weekly") or {}
+    words = weekly.get("words") or []
+    if not words:
+        return []
+    slots = weekly.setdefault("day_slots", {})
+    if today in slots:
+        by_ko = {w["korean"]: w for w in words}
+        return [by_ko[k] for k in slots[today] if k in by_ko]
+
+    status = weekly.setdefault("status", {})
+    for w in words:
+        status.setdefault(w["korean"], {"shown_count": 0, "shown_days": [],
+                                        "completed": False, "completed_date": ""})
+    rng = random.Random(today)
+    n = min(N_NEW_VOCAB, len(words))
+
+    unshown = [w for w in words if status[w["korean"]]["shown_count"] == 0]
+    # "Missed" = shown on a previous day but still not completed -> bias to repeat.
+    missed = [w for w in words
+              if status[w["korean"]]["shown_count"] > 0 and not status[w["korean"]]["completed"]]
+    completed = [w for w in words if status[w["korean"]]["completed"]]
+    rng.shuffle(unshown); rng.shuffle(completed)
+    # Order missed by how many times shown-but-missed (more missed -> earlier), then random.
+    missed.sort(key=lambda w: (-status[w["korean"]]["shown_count"], rng.random()))
+
+    chosen, used = [], set()
+
+    def take(pool):
+        for w in pool:
+            if len(chosen) >= n:
+                return
+            if w["korean"] not in used:
+                chosen.append(w); used.add(w["korean"])
+
+    # Sprinkle at most one missed-word repeat while new words remain (so reinforcement
+    # is interleaved, not dumped at week's end), then prioritize coverage.
+    if unshown and missed and rng.random() < 0.6:
+        take(missed[:1])
+    take(unshown)                 # coverage: show every word at least once
+    take(missed)                  # then repeat missed/incomplete words
+    take(completed)               # last resort: repeat completed words
+    take(words)                   # absolute fallback
+
+    slots[today] = [w["korean"] for w in chosen]
+    for w in chosen:
+        st = status[w["korean"]]
+        st["shown_count"] += 1
+        st["shown_days"].append(today)
+    return chosen
+
+
+def mark_theme_completion(state: dict, korean_words, date: str) -> int:
+    """Mark the given theme words completed (learner wrote their own sentence). Returns count newly completed."""
+    weekly = state.get("weekly") or {}
+    status = weekly.get("status") or {}
+    words_by_ko = {w["korean"]: w for w in weekly.get("words", [])}
+    n = 0
+    for ko in korean_words or []:
+        ko = (ko or "").strip()
+        st = status.get(ko)
+        if st and not st.get("completed"):
+            st["completed"] = True
+            st["completed_date"] = date
+            n += 1
+    return n
+
+
+def weekly_progress(state: dict) -> dict:
+    weekly = state.get("weekly") or {}
+    words = weekly.get("words") or []
+    status = weekly.get("status") or {}
+    completed = [w for w in words if status.get(w["korean"], {}).get("completed")]
+    remaining = [w for w in words if not status.get(w["korean"], {}).get("completed")]
+    return {
+        "theme": weekly.get("theme", ""),
+        "week_start": weekly.get("week_start", ""),
+        "total": len(words),
+        "completed": len(completed),
+        "remaining": [{"korean": w["korean"], "english": w["english"]} for w in remaining],
+        "done": bool(words) and len(completed) == len(words),
+    }
 
 
 def _take_unseen(items, start, n, seen, keyfn):
@@ -167,18 +411,12 @@ def _advance_state(state: dict, sel: dict, lesson: dict, today: str) -> dict:
         days = SRS_INTERVALS[i]
         return days, (datetime.strptime(today, "%Y-%m-%d") + timedelta(days=days)).strftime("%Y-%m-%d")
 
-    # Introduce new vocab (from the lesson, so LLM-supplied extras are included too).
-    deck_vocab = {v["korean"] for v in sel["new_vocab"]}
+    # Vocab is theme-driven now: record it as seen (so future weeks don't re-pick it)
+    # but do NOT put it on the day-interval SRS -- weekly repeats + cross-week review
+    # handle vocab reinforcement instead.
     for v in lesson.get("vocab", []):
         ko = v.get("korean")
-        if not ko:
-            continue
-        key = f"v:{ko}"
-        if key not in srs:
-            days, due = schedule(0)
-            srs[key] = {"type": "vocab", "item": {"korean": ko, "english": v.get("english", "")},
-                        "reps": 0, "interval": days, "next_due": due, "introduced": today}
-        if ko not in seen_v:
+        if ko and ko not in seen_v:
             seen_v.append(ko)
 
     for g in lesson.get("grammar", []):
@@ -202,10 +440,9 @@ def _advance_state(state: dict, sel: dict, lesson: dict, today: str) -> dict:
         days, due = schedule(rec["reps"])
         rec["interval"], rec["next_due"] = days, due
 
-    # Advance the ordered-deck pointers past everything consumed (incl. skipped).
+    # Advance the grammar deck pointer (vocab is theme-driven, not deck-indexed).
     prog = state.setdefault("progress", {"grammar_index": 0, "vocab_index": 0})
     prog["grammar_index"] = max(prog.get("grammar_index", 0), sel["new_grammar_index"])
-    prog["vocab_index"] = max(prog.get("vocab_index", 0), sel["new_vocab_index"])
 
     state.setdefault("history", []).append({"date": today, "lesson": lesson})
     return state
@@ -213,9 +450,15 @@ def _advance_state(state: dict, sel: dict, lesson: dict, today: str) -> dict:
 
 def build_lesson(state: dict, *, level: str = "intermediate", today: str | None = None,
                  model: str | None = None, offline: bool = False):
-    """Return (lesson, new_state). Selects per curriculum, teaches via LLM (or offline)."""
+    """Return (lesson, new_state). Vocab comes from the weekly theme (3/day); grammar
+    and reviews come from the curriculum/SRS. Teaches via LLM (or offline)."""
     today = today or _today()
-    sel = select_items(state, level, today)
+    ensure_week(state, today, model=model, offline=offline)
+    day_words = select_day_words(state, today)
+
+    sel = select_items(state, level, today)   # grammar + SRS reviews
+    sel["new_vocab"] = day_words              # vocab is theme-driven
+    sel["need_extra_vocab"] = 0
 
     want_culture = datetime.strptime(today, "%Y-%m-%d").weekday() == 6  # Sunday
     if offline:
@@ -224,11 +467,22 @@ def build_lesson(state: dict, *, level: str = "intermediate", today: str | None 
         data = llm.post_json(SYSTEM_PROMPT, _build_user_message(sel, state, level, want_culture),
                              model=model, temperature=0.6, max_tokens=2800, timeout=120)
         lesson = _normalize(data)
-        # Safety net: if the model dropped the required new items, fall back for those.
         if not lesson.get("vocab") and not lesson.get("grammar"):
             lesson = _offline_lesson(sel)
 
     new_state = _advance_state(state, sel, lesson, today)
+
+    # Attach the weekly theme, completion challenge, and progress to the lesson.
+    prog = weekly_progress(new_state)
+    lesson["theme"] = prog["theme"]
+    lesson["weekly_progress"] = prog
+    todays = [v.get("korean", "") for v in lesson.get("vocab", []) if v.get("korean")]
+    if todays:
+        lesson["challenge"] = (
+            "Reply to this email with your OWN example sentence for each of today's "
+            "words to complete them: " + ", ".join(todays) + ". "
+            f"Weekly theme \u201c{prog['theme']}\u201d - {prog['completed']}/{prog['total']} words done."
+        )
     return lesson, new_state
 
 
@@ -261,26 +515,63 @@ def _normalize(data: dict) -> dict:
             "culture": str(data.get("culture", "")).strip()}
 
 
+# A sentence must be correct AND natural to "pass" (count as practicing the word).
+PASS_THRESHOLD = 70
+
 GRADE_SYSTEM = """\
-You are a supportive Korean tutor grading a learner's practice sentences. They were
-practicing today's vocabulary. For each sentence, respond with ONLY a JSON object:
+You are an honest but supportive Korean tutor grading a learner's practice sentences
+for this week's THEME VOCABULARY (given below). For EACH sentence: find which theme
+word it practices (its EXACT Korean form from the list, or "" if none) and score it
+0-100. Respond with ONLY a JSON object:
 
-{ "results": [ {"sentence": "what they wrote", "score": 0-100,
-                "corrected": "a corrected/natural version (or same if already good)",
-                "feedback": "1-2 sentences: what's right, what to fix, why"} ] }
+{ "results": [ {"sentence": "what they wrote", "word": "the theme word it uses (Korean) or ''",
+                "score": 0-100,
+                "corrected": "a corrected, natural version (same as theirs if already good)",
+                "feedback": "1-2 sentences IN ENGLISH: what's right, what to fix and WHY; note any dropped particle or casual register"} ] }
 
-Be encouraging and specific. Judge grammar, naturalness, and word use. If a sentence
-is already good, say so and score high."""
+LANGUAGE OF OUTPUT:
+- "feedback" MUST be written in ENGLISH (the learner reads explanations in English).
+  You may quote Korean words/particles inside the English feedback (e.g., "you dropped
+  the object particle 을"), but the explanation itself is English, never written in Korean.
+- "corrected" stays in Korean (it is the corrected Korean sentence).
+
+SCORING RUBRIC (grade honestly - do not inflate):
+- 85-100  : correct AND natural; a native speaker would actually say it this way.
+- 70-84   : correct and clearly understandable, only minor awkwardness. (PASS)
+- 50-69   : has a real grammar error, OR the target word is used unnaturally / non-
+            idiomatically even though the meaning is guessable. (FAIL)
+- 0-49    : broken grammar, wrong word meaning, or the target word is misused. (FAIL)
+
+A sentence PASSES and counts as practicing the word ONLY at score >= 70.
+
+JUDGE STRICTLY ON:
+- Grammar correctness -> any genuine grammatical mistake keeps it BELOW 70.
+- Correct, NATURAL use of the target word -> unnatural or wrong usage keeps it BELOW
+  70, even if it could technically be understood. Naturalness counts.
+
+ALLOW LEEWAY (do NOT drop below 70 for these alone, but DO mention them in feedback):
+- Casual / colloquial register (반말, contractions) when otherwise correct.
+- Subject/topic/object particles (은/는/이/가/을/를, and 에/에서 in casual speech) that
+  native speakers naturally OMIT in conversation. Note the omission and where the
+  particle would go, but don't fail the sentence solely for a naturally dropped particle."""
 
 
-def grade_practice(sentences: list, *, vocab_context: str = "", model: str | None = None) -> list:
-    """Grade learner-submitted practice sentences. Returns list of result dicts."""
+def grade_practice(sentences: list, *, vocab_context: str = "", theme_words: list | None = None,
+                   model: str | None = None) -> list:
+    """Grade learner practice sentences and match each to a theme word.
+
+    Returns result dicts: {sentence, word, score, corrected, feedback}. ``word`` is the
+    matched theme word (Korean) only when the sentence correctly and naturally
+    practices it (score >= PASS_THRESHOLD).
+    """
     sents = [s for s in (sentences or []) if str(s).strip()]
     if not sents:
         return []
-    user = ("TODAY'S VOCAB (context):\n" + (vocab_context or "(n/a)") + "\n\n"
+    theme_txt = ", ".join(theme_words) if theme_words else (vocab_context or "(n/a)")
+    user = ("THIS WEEK'S THEME WORDS:\n" + theme_txt + "\n\n"
             "MY PRACTICE SENTENCES:\n" + "\n".join(f"- {s}" for s in sents))
-    data = llm.post_json(GRADE_SYSTEM, user, model=model, temperature=0.3, max_tokens=1500)
+    data = llm.post_json(GRADE_SYSTEM, user, model=model, temperature=0.3, max_tokens=1800)
+    valid = set(theme_words or [])
     out = []
     for r in (data.get("results") or []):
         if isinstance(r, dict) and r.get("sentence"):
@@ -288,8 +579,13 @@ def grade_practice(sentences: list, *, vocab_context: str = "", model: str | Non
                 score = int(round(float(r.get("score", 0))))
             except (TypeError, ValueError):
                 score = 0
+            score = max(0, min(100, score))
+            word = str(r.get("word", "")).strip()
+            if valid and word not in valid:
+                word = ""  # only trust exact theme-word matches
             out.append({"sentence": str(r["sentence"]).strip(),
-                        "score": max(0, min(100, score)),
+                        "word": word if score >= PASS_THRESHOLD else "",
+                        "score": score,
                         "corrected": str(r.get("corrected", "")).strip(),
                         "feedback": str(r.get("feedback", "")).strip()})
     return out
@@ -334,4 +630,56 @@ def progress_summary(state: dict) -> dict:
         "tracked_items": len(srs),
         "reviews_due": due,
         "placement_done": state.get("placement", {}).get("done", False),
+    }
+
+
+def practice_stats(state: dict) -> dict:
+    """Aggregate scorekeeping over every graded practice sentence.
+
+    Returns lifetime + this-week tallies, a pass streak, and the most recent graded
+    sentences (newest first) for display in the dashboard.
+    """
+    prac = state.get("practice", {}) or {}
+    flat = []  # (date, result)
+    for date_str in sorted(prac.keys()):
+        for r in (prac[date_str] or []):
+            if isinstance(r, dict) and str(r.get("sentence", "")).strip():
+                flat.append((date_str, r))
+
+    def _score(r):
+        try:
+            return max(0, min(100, int(round(float(r.get("score", 0))))))
+        except (TypeError, ValueError):
+            return 0
+
+    total = len(flat)
+    scores = [_score(r) for _, r in flat]
+    passed = sum(1 for s in scores if s >= PASS_THRESHOLD)
+    avg = round(sum(scores) / total) if total else 0
+
+    today = _today()
+    ws = _week_start(today)
+    wk = [s for (d, r), s in zip(flat, scores) if d >= ws]
+    wk_passed = sum(1 for s in wk if s >= PASS_THRESHOLD)
+    wk_avg = round(sum(wk) / len(wk)) if wk else 0
+
+    # Streak: consecutive days up to today with at least one passing sentence.
+    pass_days = {d for (d, r), s in zip(flat, scores) if s >= PASS_THRESHOLD}
+    streak, cur_day = 0, datetime.strptime(today, "%Y-%m-%d").date()
+    while cur_day.strftime("%Y-%m-%d") in pass_days:
+        streak += 1
+        cur_day -= timedelta(days=1)
+
+    recent = [dict(r, date=d, score=s) for (d, r), s in zip(flat, scores)][-8:][::-1]
+    return {
+        "total": total,
+        "passed": passed,
+        "avg": avg,
+        "pass_rate": round(100 * passed / total) if total else 0,
+        "week_total": len(wk),
+        "week_passed": wk_passed,
+        "week_avg": wk_avg,
+        "streak": streak,
+        "pass_threshold": PASS_THRESHOLD,
+        "recent": recent,
     }

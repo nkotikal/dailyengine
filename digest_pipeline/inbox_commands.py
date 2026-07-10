@@ -14,7 +14,7 @@ from email.header import decode_header
 
 from datetime import datetime, timedelta
 
-from . import korean, llm, memory, schedule, store, tasks
+from . import dayplan, korean, llm, memory, schedule, store, tasks
 
 
 def _imap_cfg():
@@ -310,25 +310,41 @@ def _apply(actions: dict, *, model: str | None = None) -> dict:
     if allowed:
         store.save_config(allowed)
         applied["prefs"] = len(allowed)
-    # Grade any Korean practice sentences and store for today's card.
+    # Grade any Korean practice sentences, store for today's card, and mark the
+    # matching weekly theme words COMPLETE (completion = your own example sentence).
     practice = [s for s in (actions.get("korean_practice") or []) if str(s).strip()]
     if practice:
         today = datetime.now().strftime("%Y-%m-%d")
+        kstate = store.load_korean()
+        theme_words = [w.get("korean", "") for w in
+                       (kstate.get("weekly") or {}).get("words", []) if w.get("korean")]
         lesson = store.korean_lesson_for(today) or {}
         vocab_ctx = ", ".join(f"{v.get('korean','')} ({v.get('english','')})"
                               for v in lesson.get("vocab", []))
         try:
-            results = korean.grade_practice(practice, vocab_context=vocab_ctx)
+            results = korean.grade_practice(practice, vocab_context=vocab_ctx,
+                                            theme_words=theme_words, model=model)
             if results:
                 store.save_korean_practice(today, results)
                 applied["korean_graded"] = len(results)
+                done_words = [r["word"] for r in results if r.get("word")]
+                if done_words:
+                    n = korean.mark_theme_completion(kstate, done_words, today)
+                    if n:
+                        store.save_korean(kstate)
+                        applied["korean_completed"] = n
         except llm.DigestLLMError:
             pass
     return applied
 
 
-def process_replies(*, model: str | None = None) -> dict:
-    """Read new replies and apply them. Safe to call before each digest build."""
+def process_replies(*, model: str | None = None, deterministic_only: bool = False) -> dict:
+    """Read new replies and apply them. Safe to call before each digest build.
+
+    ``deterministic_only`` (used on OFFLINE sends) skips the LLM entirely: it applies
+    only terse check-in replies (``done 1 3``) and leaves prose reflections unprocessed
+    so they're picked up by the full LLM pass once the AI is reachable again.
+    """
     cfg = store.load_config()
     recipient = (cfg.get("email_to") or "").strip()
     if not is_configured() or not recipient:
@@ -340,17 +356,26 @@ def process_replies(*, model: str | None = None) -> dict:
 
     results = []
     open_texts = _open_task_texts()
-    today = datetime.now().strftime("%Y-%m-%d")
-    weekday = datetime.now().strftime("%A")
+    now = datetime.now()
+    today = now.strftime("%Y-%m-%d")
+    weekday = now.strftime("%A")
     processed = 0
     deferred = False
     for r in replies:
+        body = r["body"]
+        if deterministic_only:
+            # Offline: only consume replies that are clearly just check-in commands.
+            if dayplan.looks_like_checkin(body):
+                results.append({"checkin": dayplan.apply_reply(body, now)})
+                store.mark_reply_processed(r["mid"])
+                processed += 1
+            continue
         try:
             actions = llm.post_json(
                 PARSE_SYSTEM,
                 f"TODAY'S DATE: {today} ({weekday}). Resolve all relative dates to "
                 f"absolute YYYY-MM-DD from this.\n\nCURRENT OPEN TASKS:\n{open_texts}\n\n"
-                f"MY REPLY:\n{r['body']}",
+                f"MY REPLY:\n{body}",
                 model=model, temperature=0, max_tokens=2000)
         except llm.DigestLLMError as exc:
             # Provider down: DON'T mark processed (so the reply is retried once AI is
@@ -358,13 +383,17 @@ def process_replies(*, model: str | None = None) -> dict:
             deferred = True
             results.append({"error": str(exc), "deferred": True})
             break
+        # Deterministic check-in first (numbered indices + response credit); this also
+        # counts a reply as "responding" to the latest check-in for the score.
+        checkin = dayplan.apply_reply(body, now)
         applied = _apply(actions, model=model)
+        applied["checkin"] = checkin
         results.append({"note": str(actions.get("note") or "").strip(), "applied": applied})
         store.mark_reply_processed(r["mid"])
         processed += 1
 
     if deferred:
         store.save_state({"replies_deferred_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
-    elif processed:
+    elif processed and not deterministic_only:
         store.save_state({"replies_deferred_at": ""})
     return {"processed": processed, "deferred": deferred, "applied": results}

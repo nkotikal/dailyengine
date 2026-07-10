@@ -129,6 +129,12 @@
       interests: $("d-interests").value.split(",").map((s) => s.trim()).filter(Boolean),
       news_sources: newsSources,
       openai_model: $("d-openai-model").value || "gpt-5.4-mini",
+      checkins_enabled: $("d-checkins") ? $("d-checkins").checked : false,
+      checkin_times: $("d-checkin-times")
+        ? $("d-checkin-times").value.split(",").map((s) => s.trim()).filter(Boolean)
+        : [],
+      eod_recap_enabled: $("d-recap") ? $("d-recap").checked : false,
+      eod_recap_time: ($("d-recap-time") && $("d-recap-time").value) || "21:00",
     };
   }
 
@@ -161,6 +167,10 @@
     $("d-news-enabled").checked = cfg.news_enabled !== false;
     $("d-interests").value = (cfg.interests || []).join(", ");
     if (cfg.openai_model) $("d-openai-model").value = cfg.openai_model;
+    if ($("d-checkins")) $("d-checkins").checked = !!cfg.checkins_enabled;
+    if ($("d-checkin-times")) $("d-checkin-times").value = (cfg.checkin_times || []).join(", ");
+    if ($("d-recap")) $("d-recap").checked = !!cfg.eod_recap_enabled;
+    if ($("d-recap-time")) $("d-recap-time").value = cfg.eod_recap_time || "21:00";
   }
 
   function renderChips(s) {
@@ -287,6 +297,8 @@
       renderTrackers(s.trackers || []);
       buildTrackerTypeSelect();
       renderKoreanPill(s.korean);
+      renderKoreanScores(s.korean);
+      renderAccountability(s.accountability);
       renderReminders(s.reminders || []);
       renderWeeklyTasks(s.weekly_tasks || []);
       if (s.news) {
@@ -425,7 +437,23 @@
   function deriveTasks() {
     // Send the current (possibly unsaved) box so it derives from what's on screen.
     wtPost("/api/digest/tasks/derive", { weekly_text: $("d-weekly-goals").value },
-           $("d-wt-derive"), 'Build from "Goals this week"');
+           $("d-wt-derive"), 'Add from "Goals this week"');
+  }
+  async function refreshTasks() {
+    const has = (($("d-weekly-goals").value) || "").trim();
+    if (!has) { wtError("Put this week's task suite in \"Goals this week\" first."); return; }
+    if (!confirm("Replace ALL current weekly tasks with a fresh set from \"Goals this week\"? "
+      + "Completed and in-progress tasks will be cleared. (Reminders are not affected.)")) return;
+    const data = await wtPost("/api/digest/tasks/derive",
+      { weekly_text: $("d-weekly-goals").value, replace: true },
+      $("d-wt-refresh"), "Refresh for new week (replace)");
+    if (data && data.ok) {
+      if (data.error_note) { wtError(data.error_note); return; }
+      const st = $("d-wt-error");
+      st.hidden = false; st.style.color = "var(--text-soft)";
+      st.textContent = `Refreshed: replaced ${data.removed} old task(s) with ${data.added} new.`;
+      setTimeout(() => { st.hidden = true; st.style.color = ""; }, 4000);
+    }
   }
   function addTask() {
     const text = $("d-wt-input").value.trim();
@@ -841,16 +869,115 @@
     const wrap = $("d-korean-progress");
     if (prog) {
       const gpct = prog.grammar_total ? Math.round(100 * prog.grammar_done / prog.grammar_total) : 0;
-      const vpct = prog.vocab_total ? Math.round(100 * prog.vocab_done / prog.vocab_total) : 0;
+      const wk = (lang === "korean" && k) ? k.weekly : null;
+      let wkHtml = "";
+      if (wk && wk.total) {
+        const wpct = Math.round(100 * wk.completed / wk.total);
+        const rem = (wk.remaining || []).map((w) => w.korean).slice(0, 15).join(", ");
+        wkHtml = `
+        <div class="d-prog-row"><span>This week: ${escapeHtml(wk.theme || "theme")}</span><span>${wk.completed}/${wk.total} completed</span></div>
+        <div class="d-prog-bar"><span style="width:${wpct}%"></span></div>
+        <div class="d-prog-meta">${wk.done ? "\u2713 Week complete!" : ("Still to complete: " + escapeHtml(rem || "\u2014"))}</div>`;
+      }
       wrap.innerHTML = `
         <div class="d-prog-row"><span>Grammar syllabus</span><span>${prog.grammar_done}/${prog.grammar_total}</span></div>
         <div class="d-prog-bar"><span style="width:${gpct}%"></span></div>
-        <div class="d-prog-row"><span>Vocabulary deck</span><span>${prog.vocab_done}/${prog.vocab_total}</span></div>
-        <div class="d-prog-bar"><span style="width:${vpct}%"></span></div>
-        <div class="d-prog-meta">${prog.tracked_items} items in spaced repetition · ${prog.reviews_due} due for review today</div>`;
+        ${wkHtml}
+        <div class="d-prog-meta">${prog.tracked_items} grammar items in spaced repetition · ${prog.reviews_due} due today · complete words by replying with your own example sentence</div>`;
     } else {
       wrap.innerHTML = "";
     }
+  }
+
+  // Persistent scorekeeping for graded practice sentences (Korean track).
+  function renderKoreanScores(k) {
+    const box = $("d-korean-scores");
+    if (!box) return;
+    const lang = (k && k.language) || "korean";
+    const ps = (lang === "korean" && k) ? k.practice : null;
+    if (!ps || !ps.total) { box.hidden = true; box.innerHTML = ""; return; }
+    box.hidden = false;
+    const pass = ps.pass_threshold || 70;
+    const chip = (label, value, sub) =>
+      `<div class="d-score-chip"><div class="d-score-val">${value}</div>` +
+      `<div class="d-score-lbl">${escapeHtml(label)}</div>` +
+      (sub ? `<div class="d-score-sub">${escapeHtml(sub)}</div>` : "") + `</div>`;
+    const streakTxt = ps.streak ? `${ps.streak}\u{1F525}` : "0";
+    let html = `<div class="d-k-heading">Practice scoreboard</div>
+      <div class="d-score-chips">
+        ${chip("Avg score", ps.avg, `${ps.passed}/${ps.total} passed`)}
+        ${chip("Pass rate", ps.pass_rate + "%", `bar to pass: ${pass}`)}
+        ${chip("This week", ps.week_avg, `${ps.week_passed}/${ps.week_total} passed`)}
+        ${chip("Streak", streakTxt, "days passing")}
+      </div>`;
+    if (ps.recent && ps.recent.length) {
+      html += `<div class="d-k-subheading">Recent sentences</div>`;
+      html += `<div class="d-score-list">` + ps.recent.map((r) => {
+        const passed = (r.score || 0) >= pass;
+        const cls = passed ? "pass" : "fail";
+        const showCorrected = r.corrected && r.corrected.trim() &&
+          r.corrected.trim() !== (r.sentence || "").trim();
+        return `<div class="d-score-item ${cls}">
+          <div class="d-score-item-top">
+            <span class="d-score-sent">${escapeHtml(r.sentence || "")}</span>
+            <span class="d-score-badge ${cls}">${r.score}</span>
+          </div>
+          ${showCorrected ? `<div class="d-score-fix"><strong>Better:</strong> ${escapeHtml(r.corrected)}</div>` : ""}
+          ${r.feedback ? `<div class="d-score-fb">${escapeHtml(r.feedback)}</div>` : ""}
+          <div class="d-score-date">${escapeHtml(r.date || "")}${r.word ? " \u00b7 practiced " + escapeHtml(r.word) : ""}</div>
+        </div>`;
+      }).join("") + `</div>`;
+    }
+    box.innerHTML = html;
+  }
+
+  // Accountability scoreboard: today's score, this week, weekly trend, leaderboard.
+  function renderAccountability(a) {
+    const pill = $("d-score-pill");
+    const board = $("d-score-board");
+    if (!a) { if (board) { board.hidden = true; board.innerHTML = ""; } return; }
+    if (pill) {
+      const on = a.checkins_enabled || a.eod_recap_enabled;
+      pill.textContent = on ? `${(a.today && a.today.total) || 0} pts today` : "off";
+      pill.className = on ? "pill good" : "pill ghost";
+    }
+    if (!board) return;
+    const today = a.today || {};
+    const week = a.week || {};
+    const chip = (val, lbl) =>
+      `<div class="d-score-chip"><div class="d-score-val">${val}</div>` +
+      `<div class="d-score-lbl">${escapeHtml(lbl)}</div></div>`;
+    let html = `<div class="d-k-heading">Score</div>
+      <div class="d-score-chips">
+        ${chip((today.total || 0), "points today")}
+        ${chip(`${today.done || 0}/${today.count || 0}`, "tasks done")}
+        ${chip((week.total || 0), "this week")}
+        ${chip(`${today.pct || 0}%`, "of plan")}
+      </div>`;
+
+    const weeks = a.weeks || [];
+    if (weeks.length) {
+      const max = Math.max(1, ...weeks.map((w) => w.total || 0));
+      html += `<div class="d-k-subheading">Weekly trend</div><div class="d-trend">` +
+        weeks.map((w) => {
+          const h = Math.round(6 + 46 * ((w.total || 0) / max));
+          const label = (w.week_start || "").slice(5);
+          return `<div class="d-trend-col" title="${escapeHtml(label)}: ${w.total || 0} pts">` +
+            `<div class="d-trend-bar" style="height:${h}px"></div>` +
+            `<div class="d-trend-x">${escapeHtml(label)}</div></div>`;
+        }).join("") + `</div>`;
+    }
+
+    const lb = a.leaderboard || [];
+    if (lb.length) {
+      html += `<div class="d-k-subheading">Leaderboard (this week)</div><div class="d-lb">` +
+        lb.map((r) => `<div class="d-lb-row">
+          <span class="d-lb-rank">#${r.rank}</span>
+          <span class="d-lb-name">${escapeHtml(r.name)}</span>
+          <span class="d-lb-pts">${r.points} pts</span></div>`).join("") + `</div>`;
+    }
+    board.hidden = false;
+    board.innerHTML = html;
   }
 
   async function setPlacement() {
@@ -903,31 +1030,40 @@
     const out = $("d-korean-out");
     out.hidden = false;
     let html = "";
+    const wp = lesson.weekly_progress;
+    if (wp && wp.theme) {
+      html += `<div class="d-k-card" style="border-color:rgba(124,155,255,0.4)">
+        <div class="d-k-label" style="margin:0 0 4px">Weekly theme: ${escapeHtml(wp.theme)} · ${wp.completed}/${wp.total} done</div>
+        ${lesson.challenge ? `<div class="d-k-en">${escapeHtml(lesson.challenge)}</div>` : ""}
+      </div>`;
+    }
     if (lesson.vocab && lesson.vocab.length) {
-      html += `<div class="d-k-label">Vocabulary</div>`;
-      html += lesson.vocab.map((v) => `<div class="d-k-card">
-        <div><span class="d-k-ko">${escapeHtml(v.korean)}</span><span class="d-k-rom">${escapeHtml(v.romanization)}</span></div>
-        <div class="d-k-en">${escapeHtml(v.english)}${v.pos ? ` <em>(${escapeHtml(v.pos)})</em>` : ""}</div>
-        ${v.example_ko ? `<div class="d-k-ex">${escapeHtml(v.example_ko)} — ${escapeHtml(v.example_en)}</div>` : ""}
-      </div>`).join("");
+      html += `<div class="d-k-section"><div class="d-k-heading">Today's words <span class="d-k-count">${lesson.vocab.length}</span></div>`;
+      html += lesson.vocab.map((v) => `<div class="d-k-card vocab">
+        <div class="d-k-term"><span class="d-k-ko">${escapeHtml(v.korean)}</span>${v.romanization ? `<span class="d-k-rom">${escapeHtml(v.romanization)}</span>` : ""}${v.pos ? ` <em class="d-k-pos">${escapeHtml(v.pos)}</em>` : ""}</div>
+        <div class="d-k-en">${escapeHtml(v.english)}</div>
+        ${v.example_ko ? `<div class="d-k-ex"><span class="d-k-ex-ko">${escapeHtml(v.example_ko)}</span><span class="d-k-ex-en">${escapeHtml(v.example_en)}</span></div>` : ""}
+      </div>`).join("") + `</div>`;
     }
     if (lesson.grammar && lesson.grammar.length) {
-      html += `<div class="d-k-label">Grammar</div>`;
-      html += lesson.grammar.map((g) => `<div class="d-k-card">
-        <div class="d-k-ko">${escapeHtml(g.point)}</div>
+      html += `<div class="d-k-section"><div class="d-k-heading">Grammar</div>`;
+      html += lesson.grammar.map((g) => `<div class="d-k-card grammar">
+        <div class="d-k-term"><span class="d-k-ko">${escapeHtml(g.point)}</span></div>
         <div class="d-k-en">${escapeHtml(g.english)}</div>
-        ${g.example_ko ? `<div class="d-k-ex">${escapeHtml(g.example_ko)} — ${escapeHtml(g.example_en)}</div>` : ""}
-      </div>`).join("");
+        ${g.form ? `<div class="d-k-form"><strong>Form:</strong> ${escapeHtml(g.form)}</div>` : ""}
+        ${g.example_ko ? `<div class="d-k-ex"><span class="d-k-ex-ko">${escapeHtml(g.example_ko)}</span><span class="d-k-ex-en">${escapeHtml(g.example_en)}</span></div>` : ""}
+      </div>`).join("") + `</div>`;
     }
     if (lesson.review && lesson.review.length) {
-      html += `<div class="d-k-label">Review (spaced repetition)</div>`;
-      html += lesson.review.map((r) => `<div class="d-k-card">
-        <div class="d-k-ko" style="font-size:15px">${escapeHtml(r.item)}</div>
-        <div class="d-k-en">${escapeHtml(r.prompt)} <em>${escapeHtml(r.answer)}</em></div>
-        ${r.example_ko ? `<div class="d-k-ex">${escapeHtml(r.example_ko)}</div>` : ""}
-      </div>`).join("");
+      html += `<div class="d-k-section"><div class="d-k-heading">Review <span class="d-k-count">spaced repetition</span></div>`;
+      html += lesson.review.map((r) => `<div class="d-k-card review">
+        <div class="d-k-term"><span class="d-k-ko">${escapeHtml(r.item)}</span></div>
+        <div class="d-k-en">${escapeHtml(r.prompt)} <strong>${escapeHtml(r.answer)}</strong></div>
+        ${r.example_ko ? `<div class="d-k-ex"><span class="d-k-ex-ko">${escapeHtml(r.example_ko)}</span>${r.example_en ? `<span class="d-k-ex-en">${escapeHtml(r.example_en)}</span>` : ""}</div>` : ""}
+      </div>`).join("") + `</div>`;
     }
-    if (lesson.tip) html += `<div class="d-tracker-results">💡 ${escapeHtml(lesson.tip)}</div>`;
+    if (lesson.tip) html += `<div class="d-k-tip">💡 <strong>Tip:</strong> ${escapeHtml(lesson.tip)}</div>`;
+    if (lesson.culture) html += `<div class="d-k-tip culture">🏛️ <strong>Culture:</strong> ${escapeHtml(lesson.culture)}</div>`;
     out.innerHTML = html;
   }
 
@@ -1348,6 +1484,13 @@
       saveConfig(true).then(loadStatus);
     });
     $("d-capacity").addEventListener("change", () => saveConfig(true));
+    // accountability (check-ins + recap)
+    ["d-checkins", "d-recap"].forEach((id) => {
+      if ($(id)) $(id).addEventListener("change", () => { saveConfig(true).then(loadStatus); });
+    });
+    ["d-checkin-times", "d-recap-time"].forEach((id) => {
+      if ($(id)) $(id).addEventListener("change", () => saveConfig(true));
+    });
     // in-page sub-tab navigation
     document.querySelectorAll("#digest-subtabs .subtab").forEach((b) =>
       b.addEventListener("click", () => switchSub(b.dataset.sub)));
@@ -1375,6 +1518,7 @@
     });
     // weekly tasks
     $("d-wt-derive").addEventListener("click", deriveTasks);
+    $("d-wt-refresh").addEventListener("click", refreshTasks);
     $("d-wt-clear-done").addEventListener("click", clearDoneTasks);
     $("d-wt-clear-all").addEventListener("click", () => clearCategory("weekly_tasks", "all weekly tasks"));
     $("d-wt-addtoggle").addEventListener("click", () => {

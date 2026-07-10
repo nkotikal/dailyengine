@@ -49,8 +49,10 @@ commentary before or after.
   contact: {name, email, phone, linkedin, github}
   education: [{institution, location, degree, gpa, dates}]
   skills: {"<Category>": ["skill", ...], ...}
-  experience: [{company, location, role, dates, bullets: ["...", ...]}]
-  projects: [{title, tech: ["..."], dates, bullets: ["...", ...]}]
+  experience: [{company, location, role, dates, bullets: [...]}]
+  projects: [{title, tech: ["..."], dates, bullets: [...]}]
+- A bullet is normally a string, but MAY be an object {"text": "...", "pinned": true}.
+  See PINNED BULLETS below. Keep any object bullets as objects with their flag intact.
 - You MAY add three extra top-level keys and no others:
   "keywords": ["..."]  - the most important job-description keywords you targeted.
   "gaps": [ {"requirement": "...", "importance": 0-100, "reason": "...", \
@@ -124,6 +126,16 @@ USER INSTRUCTIONS (the highest-priority directives; may be empty):
 - If INSTRUCTIONS are provided, apply them directly (e.g. "emphasize CUDA", "make \
 bullets shorter", "prioritize the AMD role"), subject only to the truthfulness rules.
 - Instructions are directives about HOW to edit; they are not new resume facts.
+
+PINNED BULLETS (a must-keep mechanism the candidate controls):
+- A bullet object with "pinned": true MUST always be kept: never delete it, never \
+drop it for one-page concision, and do NOT reword it (keep its text verbatim) unless \
+the instructions explicitly ask you to change that bullet. Preserve the flag.
+- If the candidate's INSTRUCTIONS ask to "pin", "always keep", "lock", or "never \
+drop" a particular bullet, output that bullet as {"text": "...", "pinned": true}. \
+If they ask to "unpin" it, convert it back to a plain string.
+- When you must cut for one page, cut UNPINNED, least-relevant bullets first. Pinned \
+bullets are floors, not candidates for removal.
 
 Return the optimized profile JSON (with "keywords", "gaps", and "summary") now."""
 

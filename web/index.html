@@ -137,7 +137,7 @@
           <h2>Additional context / instructions</h2>
           <span class="pill ghost">optional</span>
         </div>
-        <p class="hint">Extra context or directives for the AI. This is also how you ask for changes on a regenerate, e.g. "emphasize CUDA &amp; compiler work", "make bullets more concise", "prioritize the AMD role", "target ML-infra roles". Truthful facts to add belong in Coverage gaps below; this is for how to shape the resume.</p>
+        <p class="hint">Extra context or directives for the AI. This is also how you ask for changes on a regenerate, e.g. "emphasize CUDA &amp; compiler work", "make bullets more concise", "prioritize the AMD role". <strong>Keep a bullet that keeps disappearing?</strong> Say "<strong>pin the bullet about &lt;topic&gt;</strong>" - pinned bullets are never reworded and never trimmed to fit one page (other, lower-value bullets are cut first). Say "unpin ..." to release it. Truthful facts to add belong in Coverage gaps below.</p>
         <textarea id="instructions" class="field" placeholder="e.g. Emphasize GPU/CUDA and compiler execution with concrete impact; tighten the older roles to one line each."></textarea>
         <div class="row-actions">
           <button class="link-btn" id="paste-instructions" type="button" data-target="instructions">Paste from clipboard</button>
@@ -474,10 +474,13 @@
           <h2>Weekly tasks</h2>
           <span class="pill ghost" id="d-wt-pill">0 tasks</span>
         </div>
-        <p class="hint">Build a checkable task list from your <strong>Goals this week</strong> box above - the engine breaks the goals into concrete tasks, and <strong>tab-indented lines become subtasks</strong>. Then add, edit, complete, or delete tasks and subtasks freely. Open tasks drive each day's "Today's Focus".</p>
+        <p class="hint">Build a checkable task list from your <strong>Goals this week</strong> box above - the engine breaks the goals into concrete tasks, and <strong>tab-indented lines become subtasks</strong>. Then add, edit, complete, or delete tasks and subtasks freely. Open tasks drive each day's "Today's Focus". <strong>New week?</strong> Paste the new suite in "Goals this week", then use <strong>Refresh for new week</strong> to replace all tasks at once. Your reminders are stored separately and are never affected.</p>
         <div class="d-actions">
           <button class="generate" id="d-wt-derive" type="button">
-            <span class="btn-label">Build from "Goals this week"</span><span class="spinner" hidden></span>
+            <span class="btn-label">Add from "Goals this week"</span><span class="spinner" hidden></span>
+          </button>
+          <button class="btn-glass" id="d-wt-refresh" type="button">
+            <span class="btn-label">Refresh for new week (replace)</span><span class="spinner" hidden></span>
           </button>
           <button class="btn-glass" id="d-wt-clear-done" type="button">Clear completed</button>
           <button class="btn-glass" id="d-wt-clear-all" type="button">Clear all</button>
@@ -549,6 +552,7 @@
         </div>
 
         <div class="d-korean-progress" id="d-korean-progress"></div>
+        <div class="d-korean-scores" id="d-korean-scores" hidden></div>
 
         <div id="d-korean-opts">
           <div class="options">
@@ -587,6 +591,34 @@
           </button>
         </div>
         <div class="d-korean-out" id="d-korean-out" hidden></div>
+      </section>
+
+      <!-- ACCOUNTABILITY: check-ins + score -->
+      <section class="glass panel" data-group="plan">
+        <div class="section-head">
+          <h2>Accountability</h2>
+          <span class="pill ghost" id="d-score-pill">off</span>
+        </div>
+        <p class="hint">Stay on your plan through the day, all by email. Check-in emails list your numbered tasks and ask what's done; reply <strong>done 1 3</strong> (or just say it). You earn points for finishing tasks and answering promptly, and get an end-of-day recap with your score.</p>
+
+        <div class="options">
+          <label class="d-check"><input type="checkbox" id="d-checkins" /> Send progress check-in emails</label>
+        </div>
+        <div class="options">
+          <label class="select-wrap">
+            <span>Check-in times (comma-separated, 24h)</span>
+            <input type="text" id="d-checkin-times" class="field" placeholder="11:30, 15:00, 18:30" />
+          </label>
+        </div>
+        <div class="options">
+          <label class="d-check"><input type="checkbox" id="d-recap" /> Send an end-of-day recap + score</label>
+          <label class="select-wrap">
+            <span>Recap time</span>
+            <input type="time" id="d-recap-time" class="field" value="21:00" />
+          </label>
+        </div>
+
+        <div class="d-score-board" id="d-score-board" hidden></div>
       </section>
 
       <!-- REMINDERS / DEADLINES -->

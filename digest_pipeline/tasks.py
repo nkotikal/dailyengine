@@ -220,6 +220,25 @@ def derive_and_merge(weekly_text: str, *, model: str | None = None,
     return store.merge_weekly_tasks(derived, source="derived")
 
 
+def derive_and_replace(weekly_text: str, *, model: str | None = None,
+                       use_llm: bool = True) -> dict:
+    """Refresh the whole weekly task list from a new suite (e.g. a new week).
+
+    Derives the new tasks FIRST, then clears the existing weekly tasks and installs
+    the new set. Reminders live in a separate store and are never touched. If the
+    new text yields no tasks, the current list is left intact (nothing is wiped).
+    """
+    derived = derive(weekly_text, model=model, use_llm=use_llm)
+    if not derived:
+        return {"added": 0, "added_subtasks": 0, "removed": 0,
+                "tasks": store.list_weekly_tasks(),
+                "error": "No tasks could be derived from the text; kept existing tasks."}
+    removed = store.clear_weekly_tasks(False)  # tasks only; reminders untouched
+    result = store.merge_weekly_tasks(derived, source="derived")
+    result["removed"] = removed
+    return result
+
+
 # --- triage ----------------------------------------------------------------
 
 _PR_ORDER = {"critical": -1, "high": 0, "medium": 1, "low": 2}

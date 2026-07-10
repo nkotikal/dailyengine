@@ -62,6 +62,11 @@ DEFAULT_CONFIG = {
     "daily_capacity_hours": 6,   # realistic focus hours/day (headspace / anti-overload)
     "openai_model": "gpt-5.4-mini",  # OpenAI fallback model (used if AMD gateway is down)
     "news_enabled": True,        # include a Headlines section
+    # --- daily accountability (email check-ins + score) ---
+    "checkins_enabled": False,       # send progress check-in emails through the day
+    "checkin_times": ["11:30", "15:00", "18:30"],  # local HH:MM slots to check in
+    "eod_recap_enabled": False,      # send an end-of-day recap + score email
+    "eod_recap_time": "21:00",       # when the recap goes out
     "interests": [],             # topics you care about (shape headline selection)
     "news_sources": [
         {"id": "hn", "type": "hackernews", "name": "Hacker News",
@@ -185,6 +190,34 @@ def save_state(updates: dict) -> dict:
         state.update(updates or {})
         _write_json(_p("state.json"), state)
         return state
+
+
+# --- daily accountability: day plan + score history ------------------------
+
+def load_dayplan() -> dict:
+    """Today's numbered plan + check-in/score state (or {})."""
+    with _LOCK:
+        data = _read_json(_p("dayplan.json"), {})
+        return data if isinstance(data, dict) else {}
+
+
+def save_dayplan(obj: dict) -> dict:
+    with _LOCK:
+        _write_json(_p("dayplan.json"), obj or {})
+        return obj or {}
+
+
+def load_scores() -> dict:
+    """Finalized per-day scores keyed by YYYY-MM-DD (for weekly/monthly rollups)."""
+    with _LOCK:
+        data = _read_json(_p("scores.json"), {})
+        return data if isinstance(data, dict) else {}
+
+
+def save_scores(obj: dict) -> dict:
+    with _LOCK:
+        _write_json(_p("scores.json"), obj or {})
+        return obj or {}
 
 
 def merge_weekly_goals(lines) -> str:
@@ -343,6 +376,8 @@ def load_korean() -> dict:
         data.setdefault("progress", {"grammar_index": 0, "vocab_index": 0})
         data.setdefault("srs", {})  # key -> {type,item,reps,interval,next_due,introduced}
         data.setdefault("placement", {"done": False, "level": "intermediate"})
+        data.setdefault("weekly", {})          # current week's theme/words/status/day_slots
+        data.setdefault("weekly_history", [])  # past weeks (cross-week reinforcement)
         return data
 
 

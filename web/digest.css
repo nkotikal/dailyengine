@@ -166,13 +166,84 @@
 .d-done .d-tracker-meta { text-decoration: line-through; }
 
 /* ---- korean ---- */
-.d-korean-out { margin-top: 14px; display: flex; flex-direction: column; gap: 10px; }
-.d-k-card { padding: 12px 14px; border-radius: var(--radius-sm); background: rgba(0,0,0,0.20); border: 1px solid var(--glass-brd); }
-.d-k-ko { font-size: 17px; color: var(--text); font-weight: 600; }
-.d-k-rom { font-size: 12px; color: var(--accent); margin-left: 6px; }
-.d-k-en { font-size: 13.5px; color: var(--text-soft); margin-top: 2px; }
-.d-k-ex { font-size: 12.5px; color: var(--text-faint); margin-top: 5px; font-style: italic; }
+.d-korean-out { margin-top: 14px; display: flex; flex-direction: column; gap: 18px; }
+.d-k-section { display: flex; flex-direction: column; gap: 8px; }
+
+/* Clear section divider + heading */
+.d-k-heading {
+  font-size: 14px; font-weight: 800; color: var(--text);
+  letter-spacing: .2px; margin: 2px 0 2px;
+  padding-bottom: 6px; border-bottom: 2px solid var(--accent-soft);
+  display: flex; align-items: center; gap: 8px;
+}
+.d-k-count {
+  font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px;
+  color: var(--accent); background: var(--accent-soft);
+  padding: 2px 7px; border-radius: 999px;
+}
 .d-k-label { font-size: 11px; text-transform: uppercase; letter-spacing: .6px; color: var(--accent); margin: 6px 0; font-weight: 700; }
+
+.d-k-card {
+  padding: 12px 14px; border-radius: var(--radius-sm);
+  background: rgba(0,0,0,0.20); border: 1px solid var(--glass-brd);
+  border-left: 3px solid var(--accent);
+}
+.d-k-card.grammar { border-left-color: var(--accent-2, var(--accent)); }
+.d-k-card.review { border-left-color: var(--text-faint); }
+.d-k-term { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px; }
+.d-k-ko { font-size: 18px; color: var(--text); font-weight: 700; }
+.d-k-rom { font-size: 12px; color: var(--accent); margin-left: 6px; font-weight: 500; }
+.d-k-pos { font-size: 12px; color: var(--text-faint); margin-left: 6px; font-style: italic; }
+/* Definitions are bold + high-contrast so they read at a glance */
+.d-k-en { font-size: 14px; color: var(--text); font-weight: 600; margin-top: 3px; }
+.d-k-form { font-size: 12.5px; color: var(--text-soft); margin-top: 4px; }
+.d-k-ex { display: flex; flex-direction: column; gap: 1px; margin-top: 7px; padding-top: 6px; border-top: 1px dashed var(--glass-brd); }
+.d-k-ex-ko { font-size: 13px; color: var(--text-soft); }
+.d-k-ex-en { font-size: 12px; color: var(--text-faint); font-style: italic; }
+.d-k-tip { font-size: 13px; color: var(--text-soft); background: var(--accent-soft); padding: 10px 12px; border-radius: var(--radius-sm); }
+.d-k-tip.culture { background: rgba(255,255,255,0.05); }
+
+/* ---- korean practice scoreboard ---- */
+.d-korean-scores { margin: 4px 0 14px; display: flex; flex-direction: column; gap: 10px; }
+.d-korean-scores .d-k-heading { margin-bottom: 4px; }
+.d-k-subheading { font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: var(--text-faint); font-weight: 700; margin-top: 4px; }
+.d-score-chips { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.d-score-chip {
+  background: rgba(0,0,0,0.20); border: 1px solid var(--glass-brd);
+  border-radius: var(--radius-sm); padding: 10px 8px; text-align: center;
+}
+.d-score-val { font-size: 20px; font-weight: 800; color: var(--text); line-height: 1.1; }
+.d-score-lbl { font-size: 11px; color: var(--text-soft); margin-top: 3px; font-weight: 600; }
+.d-score-sub { font-size: 10px; color: var(--text-faint); margin-top: 1px; }
+.d-score-list { display: flex; flex-direction: column; gap: 8px; }
+.d-score-item {
+  padding: 10px 12px; border-radius: var(--radius-sm);
+  background: rgba(0,0,0,0.20); border: 1px solid var(--glass-brd);
+  border-left: 3px solid var(--text-faint);
+}
+.d-score-item.pass { border-left-color: var(--ok, #46c37f); }
+.d-score-item.fail { border-left-color: var(--danger, #ff7f8b); }
+.d-score-item-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.d-score-sent { font-size: 14px; color: var(--text); font-weight: 600; }
+.d-score-badge { font-size: 13px; font-weight: 800; padding: 2px 9px; border-radius: 999px; flex: none; }
+.d-score-badge.pass { background: rgba(70,195,127,0.18); color: var(--ok, #46c37f); }
+.d-score-badge.fail { background: rgba(255,127,139,0.18); color: var(--danger, #ff7f8b); }
+.d-score-fix { font-size: 12.5px; color: var(--text-soft); margin-top: 5px; }
+.d-score-fb { font-size: 12.5px; color: var(--text-faint); margin-top: 4px; }
+.d-score-date { font-size: 10.5px; color: var(--text-faint); margin-top: 5px; }
+@media (max-width: 560px) { .d-score-chips { grid-template-columns: repeat(2, 1fr); } }
+
+/* ---- accountability scoreboard ---- */
+.d-score-board { margin-top: 16px; display: flex; flex-direction: column; gap: 10px; }
+.d-trend { display: flex; align-items: flex-end; gap: 8px; height: 74px; padding: 4px 2px 0; }
+.d-trend-col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; justify-content: flex-end; }
+.d-trend-bar { width: 70%; min-height: 6px; border-radius: 5px 5px 2px 2px; background: linear-gradient(180deg, var(--accent), var(--accent-2, var(--accent))); }
+.d-trend-x { font-size: 9.5px; color: var(--text-faint); white-space: nowrap; }
+.d-lb { display: flex; flex-direction: column; gap: 6px; }
+.d-lb-row { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: var(--radius-sm); background: rgba(0,0,0,0.20); border: 1px solid var(--glass-brd); }
+.d-lb-rank { font-weight: 800; color: var(--accent); font-size: 13px; min-width: 26px; }
+.d-lb-name { flex: 1; font-size: 14px; color: var(--text); font-weight: 600; }
+.d-lb-pts { font-size: 13px; color: var(--text-soft); font-weight: 700; }
 
 /* korean progress */
 .d-korean-progress { margin: 4px 0 14px; display: flex; flex-direction: column; gap: 4px; }
