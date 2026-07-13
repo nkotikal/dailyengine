@@ -4,15 +4,27 @@ Attribution (kept here in the source; intentionally NOT emitted into the generat
 .tex output): the LaTeX preamble/macros are derived from Jake Gutierrez's resume
 template (https://github.com/sb2nov/resume), MIT License.
 
-The baseline preamble, custom macros, and section formatting are reproduced
-exactly as written. The only values that change are the explicitly-permitted
-density knobs (font size, spacing, margins) and how many bullets are kept --
-all driven by the :class:`Density` config supplied by the shrink loop.
+The preamble and macros are derived from that template, but the subheadings were
+rewritten for ATS parsing: the two-column ``tabular*`` rows (which fragment the PDF
+text layer and orphan employer/title/date fields) are replaced with plain, left-
+aligned lines, so a parser extracts clean, in-order "Employer" / "Title, Location |
+Dates" lines. Density knobs (font size, spacing, margins, bullets kept) still drive
+the one-page shrink loop.
 """
 
+import re
 from dataclasses import dataclass
 
 from .escaping import escape_latex, escape_url
+
+# Strategic bolding: LLM/content marks important spans with **double asterisks**.
+# After LaTeX-escaping (which leaves '*' untouched), those markers become \textbf{}.
+# This is ATS-safe -- bold is only a font weight; the text still extracts normally.
+_BOLD_RE = re.compile(r"\*\*(.+?)\*\*", re.S)
+
+
+def escape_with_bold(text) -> str:
+    return _BOLD_RE.sub(lambda m: "\\textbf{%s}" % m.group(1), escape_latex(text))
 from . import tailor
 
 
@@ -101,8 +113,9 @@ def render_heading(contact: dict) -> str:
         disp = github.replace("https://", "").replace("http://", "")
         parts.append(r"\href{%s}{\underline{%s}}" % (escape_url(url), escape_latex(disp)))
 
-    # First part already carries \small; join the rest with the template separator.
-    contact_line = " $|$\n    ".join(parts)
+    # First part already carries \small; join with a text-mode bar (not math $|$) so
+    # the extracted text layer shows clean " | " boundaries between contact fields.
+    contact_line = " \\textbar\\ \n    ".join(parts)
     return (
         "\\begin{center}\n"
         "    \\textbf{\\Huge \\scshape %s} \\\\ \\vspace{1pt}\n"
@@ -112,17 +125,26 @@ def render_heading(contact: dict) -> str:
 
 
 def _resume_subheading(a, b, c, d) -> str:
-    return (
-        "    \\resumeSubheading\n"
-        "      {%s}{%s}\n"
-        "      {%s}{%s}"
-    ) % (escape_latex(a), escape_latex(b), escape_latex(c), escape_latex(d))
+    """Emit an ATS-clean subheading: employer on its own line, then a left-aligned
+    meta line 'Title, Location | Dates' (parts omitted when empty). a=employer,
+    b=location, c=title/degree, d=dates."""
+    emp = escape_latex(a)
+    title = escape_latex(c)
+    loc = escape_latex(b)
+    dates = escape_latex(d)
+    left = "\\textit{%s}" % title if title else ""
+    if loc:
+        left = (left + ", " + loc) if left else loc
+    meta = left
+    if dates:
+        meta = (meta + " \\textbar\\ " + dates) if meta else dates
+    return "    \\resumeSubheading\n      {%s}{%s}" % (emp, meta)
 
 
 def _item_list(bullets) -> str:
     lines = ["      \\resumeItemListStart"]
     for b in bullets:
-        lines.append("        \\resumeItem{%s}" % escape_latex(bullet_text(b)))
+        lines.append("        \\resumeItem{%s}" % escape_with_bold(bullet_text(b)))
     lines.append("      \\resumeItemListEnd")
     return "\n".join(lines)
 
@@ -167,7 +189,7 @@ def render_projects(projects, density: Density, weights: dict) -> str:
         else:
             tech_str = str(tech)
         dates = _first(entry, "dates", "date")
-        heading = "    \\resumeProjectHeading\n        {\\textbf{%s} $|$ \\emph{%s}}{%s}" % (
+        heading = "    \\resumeProjectHeading\n        {\\textbf{%s} \\textbar\\ \\emph{%s}}{%s}" % (
             escape_latex(title),
             escape_latex(tech_str),
             escape_latex(dates),
@@ -183,7 +205,7 @@ def render_skills(ordered_categories, density: Density) -> str:
     rows = []
     for cat in ordered_categories[: density.keep_skill_categories]:
         category = escape_latex(cat["category"])
-        skills = ", ".join(escape_latex(s) for s in cat["skills"])
+        skills = ", ".join(escape_with_bold(s) for s in cat["skills"])
         rows.append("\\textbf{%s}{: %s}" % (category, skills))
     body = " \\\\\n     ".join(rows)
     return (
@@ -244,26 +266,31 @@ _DOC = r"""%-------------------------
   \item\small{{#1 \vspace{@@ITEMVSPACE@@pt}}}
 }
 
-\newcommand{\resumeSubheading}[4]{
+% ATS-friendly subheadings: single left-aligned text lines (no multi-column tables),
+% so the PDF text layer extracts as clean, in-order lines that a parser can map to
+% employer / title / dates instead of orphaning them across columns.
+% ATS-first subheading: #1 = employer/school (bold, own line), #2 = pre-joined
+% meta ("Title, Location | Dates", left-aligned). No tables and no page-wide \hfill
+% gaps, so the PDF text layer extracts as two clean, in-order lines:
+%   "Employer"
+%   "Title, Location | Dates"
+\newcommand{\resumeSubheading}[2]{
   \vspace{@@SUBLEAD@@pt}\item
-    \begin{tabular*}{0.97\textwidth}[t]{l@{\extracolsep{\fill}}r}
-      \textbf{#1} & #2 \\
-      \textit{\small#3} & \textit{\small #4} \\
-    \end{tabular*}\vspace{@@SUBTRAIL@@pt}
+    \textbf{#1} \\
+    {\small #2}
+    \vspace{@@SUBTRAIL@@pt}
 }
 
 \newcommand{\resumeSubSubheading}[2]{
     \item
-    \begin{tabular*}{0.97\textwidth}{l@{\extracolsep{\fill}}r}
-      \textit{\small#1} & \textit{\small #2} \\
-    \end{tabular*}\vspace{-7pt}
+    \textit{\small#1} \hfill \textit{\small #2}
+    \vspace{-7pt}
 }
 
 \newcommand{\resumeProjectHeading}[2]{
     \item
-    \begin{tabular*}{0.97\textwidth}{l@{\extracolsep{\fill}}r}
-      \small#1 & #2 \\
-    \end{tabular*}\vspace{-7pt}
+    \small#1 \hfill #2
+    \vspace{-7pt}
 }
 
 \newcommand{\resumeSubItem}[1]{\resumeItem{#1}\vspace{-4pt}}

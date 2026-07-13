@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 """Headless daily-digest sender, intended to be triggered by Windows Task Scheduler.
 
-The Windows task IS the schedule now (no always-on server required). This builds
-today's digest and emails it, with a once-per-day guard so an accidental double
-trigger won't send twice. Use --force to send regardless (for testing).
+The Windows task IS the schedule now (no always-on server required). Run on a short
+recurring cadence (e.g. every 15 min), this sends whatever is DUE right now:
+- the morning digest (once, at/after the send time),
+- progress check-ins (at each configured slot),
+- the end-of-day recap.
+All are cross-process de-duplicated, so an accidental double trigger (or a running
+server also doing it) never double-sends. Use --force to send the digest regardless.
 
 Run from the project root:  python3 tools/send_digest.py [--force]
 """
@@ -21,7 +25,7 @@ import app_paths  # noqa: E402
 from resume_pipeline.core import load_dotenv  # noqa: E402
 load_dotenv(app_paths.env_path())
 
-from digest_pipeline import digest, email_send  # noqa: E402
+from digest_pipeline import checkins, digest, email_send  # noqa: E402
 import user_context  # noqa: E402
 
 
@@ -55,6 +59,17 @@ def main() -> int:
         else:
             print(f"[{stamp}] {who}: {r.get('reason', 'not sent')}")
     print(f"[{stamp}] done: {sent} digest(s) sent.")
+
+    # Progress check-ins + end-of-day recap (opt-in per user; due-time gated).
+    # Cross-process de-duped, so this is safe to run on every scheduler tick.
+    try:
+        inter = checkins.run_interactivity_for_all_users(when)
+        ci = sum(x["checkins"].get("sent", 0) for x in inter)
+        rc = sum(x["recap"].get("sent", 0) for x in inter)
+        if ci or rc:
+            print(f"[{stamp}] check-ins sent: {ci}, recaps sent: {rc}.")
+    except Exception as exc:  # noqa: BLE001 - never let this break the digest task
+        print(f"[{stamp}] interactivity error: {exc}", file=sys.stderr)
     return 0
 
 

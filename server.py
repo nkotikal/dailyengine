@@ -121,6 +121,8 @@ class Handler(BaseHTTPRequestHandler):
             self._reset()
         elif self.path == "/api/compile":
             self._compile_tex()
+        elif self.path == "/api/atsify":
+            self._atsify()
         elif self.path == "/api/profile/save":
             self._profile_save()
         elif self.path == "/api/profile/version":
@@ -1002,6 +1004,66 @@ class Handler(BaseHTTPRequestHandler):
             "pdf_base64": pdf_b64,
         })
 
+    def _atsify(self):
+        try:
+            data = self._read_json_body()
+        except json.JSONDecodeError:
+            self._send_json(400, {"ok": False, "error": "Invalid request body."})
+            return
+
+        source_text = data.get("source_text") or data.get("latex") or data.get("text") or ""
+        if not isinstance(source_text, str):
+            source_text = json.dumps(source_text)
+
+        resume_pdf_bytes = None
+        pdf_b64_in = data.get("resume_pdf_base64")
+        if pdf_b64_in:
+            try:
+                resume_pdf_bytes = base64.b64decode(pdf_b64_in)
+            except (ValueError, TypeError):
+                self._send_json(400, {"ok": False, "error": "Could not decode the uploaded PDF."})
+                return
+
+        if not source_text.strip() and not resume_pdf_bytes:
+            self._send_json(400, {"ok": False, "error":
+                "Upload a resume (PDF/text/LaTeX) or paste LaTeX/text to strip."})
+            return
+
+        try:
+            result = core.atsify(
+                source_text=source_text,
+                resume_pdf_bytes=resume_pdf_bytes,
+                model=data.get("model") or None,
+                do_compile=True,
+            )
+        except CompileError as exc:
+            self._send_json(400, {"ok": False, "error": str(exc)})
+            return
+        except core.PipelineError as exc:
+            self._send_json(400, {"ok": False, "error": str(exc)})
+            return
+        except llm.LLMError as exc:
+            self._send_json(502, {"ok": False, "error": f"LLM error: {exc}"})
+            return
+        except Exception as exc:  # noqa: BLE001
+            traceback.print_exc()
+            self._send_json(500, {"ok": False, "error": f"{type(exc).__name__}: {exc}"})
+            return
+
+        pdf_b64 = ""
+        if result.pdf_path and Path(result.pdf_path).exists():
+            pdf_b64 = base64.b64encode(Path(result.pdf_path).read_bytes()).decode("ascii")
+
+        self._send_json(200, {
+            "ok": True,
+            "pages": result.pages,
+            "profile_name": result.profile_name,
+            "hit_floor": result.hit_floor,
+            "warnings": result.warnings,
+            "tex": result.tex,
+            "pdf_base64": pdf_b64,
+        })
+
     def _generate(self):
         try:
             data = self._read_json_body()
@@ -1032,6 +1094,12 @@ class Handler(BaseHTTPRequestHandler):
         # Fresh pass re-optimizes from the base profile, ignoring the converged draft.
         fresh_pass = bool(data.get("fresh_pass"))
 
+        # Strategic bolding: auto-bold important spans, optionally guided by a spec.
+        bold = bool(data.get("bold"))
+        bold_spec = data.get("bold_spec") or ""
+        if not isinstance(bold_spec, str):
+            bold_spec = json.dumps(bold_spec)
+
         # An optional PDF resume arrives base64-encoded.
         resume_pdf_bytes = None
         pdf_b64_in = data.get("resume_pdf_base64")
@@ -1054,6 +1122,8 @@ class Handler(BaseHTTPRequestHandler):
                 notes=notes,
                 instructions=instructions,
                 fresh_pass=fresh_pass,
+                bold=bold,
+                bold_spec=bold_spec,
                 deterministic=deterministic,
                 model=model,
                 do_compile=True,

@@ -735,21 +735,33 @@ def _link(url: str, color: str) -> str:
             f'font-weight:700;text-decoration:none;white-space:nowrap;">open \u2197</a>')
 
 
-def render_html(data: dict, when_human: str) -> str:
-    """Inline-styled HTML email: one calm, unified card system.
+# Sections that belong in the top "at a glance" zone (in this order). Everything
+# else is pushed into the compact reference zone below the divider.
+GLANCE_ORDER = {"today's focus": 0, "priorities": 0, "schedule": 1,
+                "reminders": 2, "deadlines": 2}
 
-    Every section is a card with a colored left-accent bar and a clean header. Brief
-    sections read large and prominent; reference sections (schedule, tasks, language,
-    etc.) are quieter and smaller, below a subtle divider - so the eye lands on what
-    matters first and the rest stays available without shouting.
+
+def _section_key(sec: dict) -> str:
+    if sec.get("kind") == "schedule":
+        return "schedule"
+    return (sec.get("title") or "").strip().lower()
+
+
+def render_html(data: dict, when_human: str) -> str:
+    """Inline-styled 'day at a glance' HTML email.
+
+    The top is a tight, high-signal glance: top priority, the numbered check-off
+    plan, and today's schedule timeline - what you act on. Everything else (news,
+    progress, this week's full list, language practice, etc.) is compacted into a
+    quiet reference zone below a divider, so the morning read is fast and focused.
     """
     bg = "#0b0e1a"
     card = "#141829"
     brd = "#232842"
     line = "rgba(255,255,255,0.06)"
     text = "#eef1fb"
-    soft = "#aeb6d2"
-    faint = "#767f9e"
+    soft = "#b8bfd8"
+    faint = "#7d86a5"
     fam = ("-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,"
            "sans-serif")
     shadow = "0 4px 16px rgba(5,7,20,0.35)"
@@ -761,11 +773,11 @@ def render_html(data: dict, when_human: str) -> str:
         # Slim gradient header; the greeting is folded in so the top isn't stacked.
         f'<div style="background:linear-gradient(135deg,#5b6bf0,#8a5cf0);'
         f'border-radius:20px;padding:22px 22px;box-shadow:0 8px 24px rgba(91,107,240,0.28);">'
-        f'<div style="font-size:11.5px;letter-spacing:3px;text-transform:uppercase;'
+        f'<div style="font-size:12.5px;letter-spacing:3px;text-transform:uppercase;'
         f'color:rgba(255,255,255,0.85);font-weight:700;">\u2600\ufe0f Daily Brief</div>'
-        f'<div style="font-size:22px;font-weight:800;color:#fff;margin-top:6px;'
+        f'<div style="font-size:25px;font-weight:800;color:#fff;margin-top:6px;'
         f'letter-spacing:-0.3px;">{_esc(when_human)}</div>'
-        + (f'<div style="font-size:14.5px;line-height:1.5;color:rgba(255,255,255,0.9);'
+        + (f'<div style="font-size:16px;line-height:1.5;color:rgba(255,255,255,0.9);'
            f'margin-top:8px;">{_esc(data["greeting"])}</div>' if data.get("greeting") else "")
         + '</div>',
     ]
@@ -781,45 +793,46 @@ def render_html(data: dict, when_human: str) -> str:
             else:
                 tag, tagbg = "TODAY", "#ff8f2e"
             due = x.get("due") or ""
-            due_html = (f" <span style='color:#ffd9d9;font-weight:600;font-size:13px;'>({_esc(due)})</span>"
+            due_html = (f" <span style='color:#ffd9d9;font-weight:600;font-size:14px;'>({_esc(due)})</span>"
                         if due else "")
             rows_html.append(
                 f'<div style="padding:8px 0;border-top:1px solid rgba(255,255,255,0.12);">'
-                f'<span style="background:{tagbg};color:#1a0000;font-size:10px;font-weight:800;'
+                f'<span style="background:{tagbg};color:#1a0000;font-size:11px;font-weight:800;'
                 f'letter-spacing:.4px;padding:2px 7px;border-radius:5px;margin-right:8px;'
                 f'white-space:nowrap;">{_esc(tag)}</span>'
-                f'<span style="font-size:15.5px;line-height:1.5;color:#fff;font-weight:700;">'
+                f'<span style="font-size:17px;line-height:1.5;color:#fff;font-weight:700;">'
                 f'{_esc(x.get("text",""))}{due_html}</span></div>'
             )
         parts.append(
             f'<div style="margin:16px 2px 0;padding:14px 18px;border-radius:14px;'
             f'background:#2a0e18;border:1px solid #ff2d55;">'
-            f'<div style="font-size:12px;letter-spacing:1.4px;text-transform:uppercase;'
+            f'<div style="font-size:13px;letter-spacing:1.4px;text-transform:uppercase;'
             f'color:#ff7a95;font-weight:800;margin-bottom:2px;">\u23F0 Due today</div>'
             + "".join(rows_html) + '</div>'
         )
 
     if data.get("motivation"):
         parts.append(
-            f'<div style="margin:16px 2px 0;padding:13px 16px;border-radius:12px;'
+            f'<div style="margin:16px 2px 0;padding:14px 16px;border-radius:12px;'
             f'background:rgba(255,126,182,0.08);border-left:4px solid #ff7eb6;">'
-            f'<div style="font-size:16px;line-height:1.5;color:{text};font-weight:600;'
+            f'<div style="font-size:17.5px;line-height:1.5;color:{text};font-weight:600;'
             f'font-style:italic;">{_esc(data["motivation"])}</div></div>'
         )
 
     if data.get("headline"):
         parts.append(
             f'<div style="background:{card};border:1px solid {brd};border-left:4px solid #8aa0ff;'
-            f'border-radius:14px;padding:15px 18px;margin:16px 2px 4px;box-shadow:{shadow};">'
-            f'<div style="font-size:10.5px;letter-spacing:1.4px;text-transform:uppercase;'
+            f'border-radius:14px;padding:16px 18px;margin:16px 2px 4px;box-shadow:{shadow};">'
+            f'<div style="font-size:11.5px;letter-spacing:1.4px;text-transform:uppercase;'
             f'color:#8aa0ff;font-weight:800;margin-bottom:5px;">\u2b50 Top priority</div>'
-            f'<div style="font-size:18px;line-height:1.5;color:#fff;font-weight:700;">'
+            f'<div style="font-size:20px;line-height:1.45;color:#fff;font-weight:700;">'
             f'{_esc(data["headline"])}</div></div>'
         )
 
     # Numbered "Today's plan" card (accountability loop): tap [✓ done] or reply "done N".
     dp = data.get("dayplan")
-    if dp and dp.get("items"):
+    have_plan = bool(dp and dp.get("items"))
+    if have_plan:
         sc = dp.get("score", {})
         rows = []
         for it in dp["items"]:
@@ -828,149 +841,167 @@ def render_html(data: dict, when_human: str) -> str:
                 tstyle = f'color:{faint};text-decoration:line-through;'
                 quick = ""
             else:
-                mark = (f'<span style="display:inline-block;min-width:20px;color:{soft};'
+                mark = (f'<span style="display:inline-block;min-width:22px;color:{soft};'
                         f'font-weight:800;">{it["idx"]}.</span>')
                 tstyle = f'color:{text};font-weight:600;'
-                quick = (f' <a href="{_esc(it["mailto"])}" style="color:#34d399;font-size:12px;'
+                quick = (f' <a href="{_esc(it["mailto"])}" style="color:#34d399;font-size:13px;'
                          f'font-weight:700;text-decoration:none;white-space:nowrap;">[\u2713 done]</a>'
                          if it.get("mailto") else "")
             flag = ("\u203c\ufe0f " if it["priority"] == "critical"
                     else ("\u2b50 " if it["priority"] == "high" else ""))
-            ann = (f' <span style="color:{faint};font-size:12.5px;">({_esc(it["annotation"])})</span>'
+            ann = (f' <span style="color:{faint};font-size:13.5px;">({_esc(it["annotation"])})</span>'
                    if it.get("annotation") else "")
             rows.append(
-                f'<div style="padding:7px 0;border-top:1px solid {line};">'
-                f'<span style="display:inline-block;width:24px;">{mark}</span>'
-                f'<span style="font-size:15px;line-height:1.5;{tstyle}">{flag}{_esc(it["text"])}</span>'
+                f'<div style="padding:8px 0;border-top:1px solid {line};">'
+                f'<span style="display:inline-block;width:26px;">{mark}</span>'
+                f'<span style="font-size:16.5px;line-height:1.5;{tstyle}">{flag}{_esc(it["text"])}</span>'
                 f'{ann}{quick}</div>')
         parts.append(
             f'<div style="background:{card};border:1px solid {brd};border-left:4px solid #34d399;'
-            f'border-radius:14px;padding:14px 18px;margin:16px 2px 4px;box-shadow:{shadow};">'
-            f'<div style="margin-bottom:6px;"><span style="font-size:16px;font-weight:800;'
+            f'border-radius:14px;padding:15px 18px;margin:16px 2px 4px;box-shadow:{shadow};">'
+            f'<div style="margin-bottom:6px;"><span style="font-size:18.5px;font-weight:800;'
             f'color:{text};">\u2705 Today\u2019s plan</span>'
-            f'<span style="float:right;font-size:12.5px;color:{soft};font-weight:700;">'
+            f'<span style="float:right;font-size:13.5px;color:{soft};font-weight:700;padding-top:5px;">'
             f'{sc.get("done",0)}/{sc.get("count",0)} \u00b7 {sc.get("total",0)} pts</span></div>'
             + "".join(rows)
-            + f'<div style="margin-top:9px;font-size:12.5px;color:{faint};line-height:1.5;">'
+            + f'<div style="margin-top:10px;font-size:13.5px;color:{faint};line-height:1.5;">'
             f'Reply <strong style="color:{soft};">done 1 3</strong> as you finish. '
             f'I\u2019ll check in later and total your score.</div></div>')
 
-    # A little breathing room before the section stack.
-    parts.append('<div style="height:6px;"></div>')
-
-    detail_started = False
+    # --- partition sections into the glance zone vs. the reference zone ---
+    glance, reference = [], []
     for sec in data.get("sections", []):
-        title = sec.get("title", "")
-        is_detail = (title.strip().lower() in DETAIL_TITLES
-                     or bool(sec.get("detail")) or sec.get("kind") == "schedule")
-        color, tint = _theme(title)
-        icon = (sec.get("icon") or "").strip()
+        k = _section_key(sec)
+        if k in GLANCE_ORDER:
+            # When the numbered plan is present it IS the focus list - don't also
+            # show the LLM's "Today's Focus" prose (that's the clutter we're cutting).
+            if have_plan and k in ("today's focus", "priorities"):
+                continue
+            glance.append(sec)
+        else:
+            reference.append(sec)
+    glance.sort(key=lambda s: GLANCE_ORDER.get(_section_key(s), 9))
 
-        if is_detail and not detail_started:
-            detail_started = True
-            # Subtle "label on a line" divider between the brief and the reference zone.
-            parts.append(
-                f'<div style="margin:24px 6px 14px;border-top:1px solid {brd};line-height:0;">'
-                f'<span style="display:inline-block;background:{bg};padding:0 12px;'
-                f'position:relative;top:-8px;font-size:10px;letter-spacing:2.5px;'
-                f'text-transform:uppercase;color:{faint};font-weight:700;">for reference</span></div>'
+    def render_schedule(sec, color, icon, *, prominent):
+        p = [
+            f'<div style="background:{card};border:1px solid {brd};'
+            f'border-left:{"4px" if prominent else "3px"} solid {color};'
+            f'border-radius:14px;padding:15px 18px 9px;margin:0 2px {"14px" if prominent else "10px"};'
+            f'{f"box-shadow:{shadow};" if prominent else ""}">'
+            f'<div style="font-size:{"15px" if prominent else "12.5px"};font-weight:800;'
+            f'letter-spacing:.4px;text-transform:uppercase;color:{color};margin-bottom:11px;">'
+            f'{_esc(icon)} {_esc(sec.get("title",""))}</div>'
+        ]
+        for blk in sec.get("blocks", []):
+            p.append(
+                f'<div style="display:flex;gap:12px;padding:8px 0;border-top:1px solid {line};">'
+                f'<div style="flex:0 0 60px;">'
+                f'<span style="display:inline-block;background:{color};color:#0b0e1a;'
+                f'font-size:12px;font-weight:800;padding:3px 8px;border-radius:6px;'
+                f'white-space:nowrap;">{_esc(blk.get("time", ""))}</span></div>'
+                f'<div style="flex:1 1 auto;">'
             )
-
-        # Schedule: a clean, time-chunked layout (grouped by hour).
-        if sec.get("kind") == "schedule":
-            parts.append(
-                f'<div style="background:{card};border:1px solid {brd};border-left:3px solid {color};'
-                f'border-radius:12px;padding:14px 16px 8px;margin:0 2px 12px;">'
-                f'<div style="font-size:12.5px;font-weight:800;letter-spacing:.5px;'
-                f'text-transform:uppercase;color:{color};margin-bottom:10px;">'
-                f'{_esc(icon)} {_esc(title)}</div>'
-            )
-            for blk in sec.get("blocks", []):
-                parts.append(
-                    f'<div style="display:flex;gap:12px;padding:7px 0;border-top:1px solid {line};">'
-                    f'<div style="flex:0 0 58px;">'
-                    f'<span style="display:inline-block;background:{color};color:#0b0e1a;'
-                    f'font-size:11px;font-weight:800;padding:3px 8px;border-radius:6px;'
-                    f'white-space:nowrap;">{_esc(blk.get("time", ""))}</span></div>'
-                    f'<div style="flex:1 1 auto;">'
+            for t in blk.get("tasks", []):
+                mark = ("\u203c\ufe0f " if t["priority"] == "critical"
+                        else ("\u2b50 " if t["priority"] == "high" else ""))
+                p.append(
+                    f'<div style="font-size:16px;line-height:1.5;color:{text};'
+                    f'font-weight:600;margin:0 0 2px;">{mark}{_esc(t["text"])}</div>'
                 )
-                for t in blk.get("tasks", []):
-                    mark = ("\u203c\ufe0f " if t["priority"] == "critical"
-                            else ("\u2b50 " if t["priority"] == "high" else ""))
-                    parts.append(
-                        f'<div style="font-size:14.5px;line-height:1.5;color:{text};'
-                        f'font-weight:600;margin:0 0 2px;">{mark}{_esc(t["text"])}</div>'
+                for s in t.get("subs", []):
+                    smark = ("\u203c\ufe0f " if s["priority"] == "critical"
+                             else ("\u2b50 " if s["priority"] == "high" else "\u00b7 "))
+                    p.append(
+                        f'<div style="font-size:14px;line-height:1.45;color:{soft};'
+                        f'margin:1px 0 1px 6px;">{smark}{_esc(s["text"])}</div>'
                     )
-                    for s in t.get("subs", []):
-                        smark = ("\u203c\ufe0f " if s["priority"] == "critical"
-                                 else ("\u2b50 " if s["priority"] == "high" else "\u00b7 "))
-                        parts.append(
-                            f'<div style="font-size:13px;line-height:1.45;color:{soft};'
-                            f'margin:1px 0 1px 6px;">{smark}{_esc(s["text"])}</div>'
-                        )
-                parts.append('</div></div>')
-            parts.append('</div>')
-            continue
+            p.append('</div></div>')
+        p.append('</div>')
+        return "".join(p)
 
-        if is_detail:
-            # Quiet reference card: muted, smaller, same left-accent language.
-            parts.append(
-                f'<div style="background:rgba(255,255,255,0.02);border:1px solid {line};'
-                f'border-left:3px solid {color};border-radius:12px;padding:12px 15px;margin:0 2px 10px;">'
-                f'<div style="font-size:12px;font-weight:800;letter-spacing:.5px;'
-                f'text-transform:uppercase;color:{color};margin-bottom:8px;">'
-                f'{_esc(icon)} {_esc(title)}</div>'
-            )
-            if sec.get("summary"):
-                parts.append(
-                    f'<p style="font-size:13.5px;line-height:1.6;color:{soft};margin:0 0 '
-                    f'{"8px" if sec.get("items") else "0"};">{_esc(sec["summary"])}</p>')
-            for it in sec.get("items", []):
-                parts.append(
-                    f'<div style="font-size:13.5px;line-height:1.55;color:{soft};'
-                    f'margin:0 0 4px;">{_esc(it.get("text"))}{_link(it.get("url"), color)}</div>'
-                )
-            parts.append('</div>')
-            continue
-
-        # Brief section: prominent left-accent card with a clean badge header.
-        parts.append(
+    def render_brief(sec, color, tint, icon):
+        p = [
             f'<div style="background:{card};border:1px solid {brd};border-left:4px solid {color};'
-            f'border-radius:14px;padding:15px 18px;margin:0 2px 14px;box-shadow:{shadow};">'
+            f'border-radius:14px;padding:16px 18px;margin:0 2px 14px;box-shadow:{shadow};">'
             f'<div style="margin-bottom:10px;">{_badge(icon, tint)}'
-            f'<span style="font-size:16.5px;font-weight:800;color:{color};'
-            f'vertical-align:middle;">{_esc(title)}</span></div>'
-        )
+            f'<span style="font-size:18.5px;font-weight:800;color:{color};'
+            f'vertical-align:middle;">{_esc(sec.get("title",""))}</span></div>'
+        ]
         if sec.get("summary"):
-            parts.append(
-                f'<p style="font-size:15.5px;line-height:1.65;color:{text};margin:0 0 '
-                f'{"12px" if sec.get("items") else "0"};">{_esc(sec["summary"])}</p>'
-            )
+            p.append(
+                f'<p style="font-size:17px;line-height:1.65;color:{text};margin:0 0 '
+                f'{"12px" if sec.get("items") else "0"};">{_esc(sec["summary"])}</p>')
         for it in sec.get("items", []):
             dot = PRIORITY_COLOR.get(it.get("priority", "medium"), color)
-            parts.append(
-                f'<div style="margin:0 0 8px;">'
-                f'<span style="display:inline-block;width:8px;height:8px;border-radius:50%;'
+            p.append(
+                f'<div style="margin:0 0 9px;">'
+                f'<span style="display:inline-block;width:9px;height:9px;border-radius:50%;'
                 f'background:{dot};margin:0 10px 1px 0;vertical-align:middle;"></span>'
-                f'<span style="font-size:15px;line-height:1.55;color:{text};">'
+                f'<span style="font-size:16.5px;line-height:1.55;color:{text};">'
                 f'{_esc(it.get("text"))}{_link(it.get("url"), color)}</span></div>'
             )
-        parts.append('</div>')
+        p.append('</div>')
+        return "".join(p)
+
+    def render_compact(sec, color, icon):
+        p = [
+            f'<div style="background:rgba(255,255,255,0.02);border:1px solid {line};'
+            f'border-left:3px solid {color};border-radius:12px;padding:12px 15px;margin:0 2px 10px;">'
+            f'<div style="font-size:12.5px;font-weight:800;letter-spacing:.5px;'
+            f'text-transform:uppercase;color:{color};margin-bottom:8px;">'
+            f'{_esc(icon)} {_esc(sec.get("title",""))}</div>'
+        ]
+        if sec.get("summary"):
+            p.append(
+                f'<p style="font-size:14.5px;line-height:1.6;color:{soft};margin:0 0 '
+                f'{"8px" if sec.get("items") else "0"};">{_esc(sec["summary"])}</p>')
+        for it in sec.get("items", []):
+            p.append(
+                f'<div style="font-size:14.5px;line-height:1.55;color:{soft};'
+                f'margin:0 0 5px;">{_esc(it.get("text"))}{_link(it.get("url"), color)}</div>'
+            )
+        p.append('</div>')
+        return "".join(p)
+
+    # --- glance zone (prominent) ---
+    for sec in glance:
+        color, tint = _theme(sec.get("title", ""))
+        icon = (sec.get("icon") or "").strip()
+        if sec.get("kind") == "schedule":
+            parts.append(render_schedule(sec, color, icon, prominent=True))
+        else:
+            parts.append(render_brief(sec, color, tint, icon))
+
+    # --- reference zone (compact), behind a subtle divider ---
+    if reference:
+        parts.append(
+            f'<div style="margin:24px 6px 14px;border-top:1px solid {brd};line-height:0;">'
+            f'<span style="display:inline-block;background:{bg};padding:0 12px;'
+            f'position:relative;top:-8px;font-size:10.5px;letter-spacing:2.5px;'
+            f'text-transform:uppercase;color:{faint};font-weight:700;">for reference</span></div>'
+        )
+        for sec in reference:
+            color, tint = _theme(sec.get("title", ""))
+            icon = (sec.get("icon") or "").strip()
+            if sec.get("kind") == "schedule":
+                parts.append(render_schedule(sec, color, icon, prominent=False))
+            else:
+                parts.append(render_compact(sec, color, icon))
 
     if data.get("closing"):
         parts.append(
-            f'<p style="font-size:15px;line-height:1.6;color:{soft};margin:20px 4px 8px;'
+            f'<p style="font-size:16px;line-height:1.6;color:{soft};margin:20px 4px 8px;'
             f'font-style:italic;">{_esc(data["closing"])}</p>'
         )
     parts.append(
-        f'<div style="margin:20px 2px 0;padding:14px 16px;background:rgba(124,155,255,0.08);'
-        f'border:1px solid {brd};border-radius:12px;font-size:13.5px;line-height:1.6;'
+        f'<div style="margin:20px 2px 0;padding:15px 16px;background:rgba(124,155,255,0.08);'
+        f'border:1px solid {brd};border-radius:12px;font-size:14.5px;line-height:1.6;'
         f'color:{soft};">\U0001F4AC <strong style="color:{text};">Reply</strong> to update anything '
         f'\u2014 "finished the PR", "add: book flights by Friday", "more compilers, less crypto". '
         f'It shapes tomorrow\u2019s brief.</div>'
     )
     parts.append(
-        f'<div style="text-align:center;color:{faint};font-size:11.5px;margin:16px 6px 4px;">'
+        f'<div style="text-align:center;color:{faint};font-size:12px;margin:16px 6px 4px;">'
         f'Daily Digest \u00b7 reply anytime</div>'
     )
     parts.append("</div></div>")

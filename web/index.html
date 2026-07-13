@@ -143,6 +143,19 @@
           <button class="link-btn" id="paste-instructions" type="button" data-target="instructions">Paste from clipboard</button>
         </div>
 
+        <div class="section-head spaced">
+          <h2>Strategic bolding</h2>
+          <label class="switch-wrap" title="Let the AI bold the most important spans in each bullet.">
+            <span>Auto-bold</span>
+            <span class="switch">
+              <input type="checkbox" id="bold-toggle" />
+              <span class="track"><span class="thumb"></span></span>
+            </span>
+          </label>
+        </div>
+        <p class="hint">Make key things stand out with bold (ATS-safe - bold is just weight). Flip on <strong>Auto-bold</strong> to let the AI pick the highest-impact spans (metrics + top tech), or say exactly what to bold below. It refines and persists on each regenerate.</p>
+        <input type="text" id="bold-spec" class="field" placeholder="What to bold (optional), e.g. metrics &amp; numbers, key technologies, product/company names, scope" />
+
         <div class="options">
           <label class="select-wrap">
             <span>Model</span>
@@ -222,6 +235,32 @@
         </div>
       </section>
     </div>
+
+    <!-- ATS-IFY PANEL -->
+    <section class="glass panel" id="atsify-panel">
+      <div class="section-head">
+        <h2>ATS-ify a résumé</h2>
+        <span class="pill ghost">standalone · won't touch your saved profile</span>
+      </div>
+      <p class="hint">Upload a résumé (PDF, text, or LaTeX) or paste LaTeX/text, and strip it to the most ATS-friendly one-page format - no tables, clean extractable text layer, faithful to your content (no rewriting). The result appears in <strong>Preview</strong> above, where you can edit the LaTeX or download it.</p>
+      <div class="upload-row">
+        <label class="btn-glass subtle upload-btn">
+          <span>Upload résumé</span>
+          <input type="file" id="ats-file" accept=".pdf,.txt,.tex,.md,.json" hidden />
+        </label>
+        <span class="file-chip" id="ats-file-chip" hidden></span>
+        <span class="micro">PDF, TXT, TEX, or JSON</span>
+      </div>
+      <textarea id="ats-input" class="field mono" spellcheck="false" placeholder="...or paste your LaTeX source or résumé text here"></textarea>
+      <div class="row-actions">
+        <button class="link-btn" id="paste-ats" type="button" data-target="ats-input">Paste from clipboard</button>
+      </div>
+      <button class="generate" id="ats-run" type="button">
+        <span class="btn-label">Strip to ATS-friendly one page</span>
+        <span class="spinner" hidden></span>
+      </button>
+      <div class="error" id="ats-error" hidden></div>
+    </section>
 
     <!-- COVERAGE GAPS PANEL -->
     <section class="glass panel gaps-panel" id="gaps-panel" hidden>

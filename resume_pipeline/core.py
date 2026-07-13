@@ -234,6 +234,87 @@ class CompileResult:
     warnings: list = field(default_factory=list)
 
 
+@dataclass
+class AtsifyResult:
+    tex: str
+    pdf_path: Optional[Path] = None
+    pages: Optional[int] = None
+    profile_name: str = ""
+    hit_floor: bool = False
+    warnings: list = field(default_factory=list)
+
+
+def atsify(
+    *,
+    source_text: str = "",
+    resume_pdf_bytes: Optional[bytes] = None,
+    model: Optional[str] = None,
+    api_key: Optional[str] = None,
+    base_url: Optional[str] = None,
+    auth_style: Optional[str] = None,
+    do_compile: bool = True,
+    out_path: Path = DEFAULT_OUT,
+) -> AtsifyResult:
+    """Strip an arbitrary resume down to the ATS-friendly, one-page layout.
+
+    Accepts a PDF (bytes), plain text, LaTeX source, or a profile JSON. The content
+    is faithfully extracted into the structured schema (no tailoring, no fabrication),
+    then rendered in the ATS-clean template and auto-fit to one page. This is a
+    standalone conversion: it does NOT read or modify your saved profile.
+    """
+    load_dotenv()
+    out_path = Path(out_path)
+    model = model or os.environ.get("ANTHROPIC_MODEL") or llm.DEFAULT_MODEL
+
+    profile = None
+    raw_parts = []
+    if resume_pdf_bytes:
+        raw_parts.append(extract_pdf_text(resume_pdf_bytes))
+    if source_text and source_text.strip():
+        as_json = _try_profile_json(source_text)
+        if as_json is not None:
+            profile = as_json                    # already-structured profile JSON
+        else:
+            raw_parts.append(source_text.strip())  # plain text or LaTeX source
+    raw = "\n\n".join(p for p in raw_parts if p).strip()
+
+    if profile is None:
+        if not raw:
+            raise PipelineError(
+                "No resume content provided. Upload a PDF, or paste resume text or LaTeX."
+            )
+        # extract_profile is faithful (no embellishment) and ignores LaTeX markup.
+        profile = llm.extract_profile(
+            raw, api_key=api_key, model=model, base_url=base_url, auth_style=auth_style,
+        )
+    if not isinstance(profile, dict):
+        raise PipelineError("Could not parse a resume structure from the input.")
+
+    contact = profile.get("contact") or {}
+    result = AtsifyResult(tex="", profile_name=str(contact.get("name", "")).strip()
+                          if isinstance(contact, dict) else "")
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if not do_compile:
+        result.tex = build_document(profile, {}, Density())
+        out_path.write_text(result.tex, encoding="utf-8")
+        return result
+
+    if not texc.have_pdflatex():
+        raise PipelineError("pdflatex not found. Install TeX Live in WSL (see README).")
+    workdir = out_path.parent / "_build"
+    tex, pdf, density, pages, hit_floor = texc.fit_one_page(profile, {}, workdir)
+    out_path.write_text(tex, encoding="utf-8")
+    final_pdf = out_path.with_suffix(".pdf")
+    shutil.copyfile(pdf, final_pdf)
+    result.tex, result.pdf_path, result.pages, result.hit_floor = tex, final_pdf, pages, hit_floor
+    if hit_floor and pages != 1:
+        result.warnings.append(
+            f"Could not reach one page without crossing ATS-safety floors; stopped at {pages} pages."
+        )
+    return result
+
+
 def compile_from_tex(
     tex: str,
     *,
@@ -289,6 +370,8 @@ def generate(
     notes: str = "",
     instructions: str = "",
     fresh_pass: bool = False,
+    bold: bool = False,
+    bold_spec: str = "",
     save_profile: bool = True,
     deterministic: bool = False,
     model: Optional[str] = None,
@@ -419,6 +502,7 @@ def generate(
             optimizer_input, job_description, api_key=api_key, model=model,
             base_url=base_url, auth_style=auth_style, extra_context=effective_context,
             is_iteration=is_iteration, new_notes=notes, instructions=(instructions or "").strip(),
+            bold=bold, bold_spec=(bold_spec or "").strip(),
         )
         result.used_llm = True
         result.context_used = bool(effective_context.strip())

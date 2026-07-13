@@ -650,6 +650,10 @@ textarea#jd { min-height: 190px; }
 .gaps-extra label { display: block; margin-bottom: 6px; }
 textarea#gaps-notes { min-height: 70px; }
 
+/* ----- ATS-ify panel ----- */
+#atsify-panel { margin-top: 22px; }
+#ats-input { width: 100%; min-height: 160px; white-space: pre; tab-size: 2; margin-top: 10px; }
+
 /* ----- change diff ----- */
 .diff-wrap { margin-top: 12px; }
 .diff-view {

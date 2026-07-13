@@ -219,6 +219,9 @@ async function generate(opts) {
   const instructions = ($("instructions").value || "").trim();
   if (instructions) payload.instructions = instructions;
   if ($("fresh-pass").checked) payload.fresh_pass = true;
+  const boldSpec = ($("bold-spec").value || "").trim();
+  if ($("bold-toggle").checked || boldSpec) payload.bold = true;
+  if (boldSpec) payload.bold_spec = boldSpec;
 
   setBusy(true, opts.fromGaps);
   try {
@@ -494,6 +497,84 @@ function renderDiff(diff, changed, profileSource) {
   btn.hidden = false;
   wrap.hidden = false;  // auto-open so changes are immediately visible
   $("toggle-diff").firstChild.textContent = "Hide changes ";
+}
+
+// ---- ATS-ify: strip any resume to the ATS-friendly one-page layout ----
+let pendingAtsPdf = null;
+
+function clearAtsFile() {
+  pendingAtsPdf = null;
+  const chip = $("ats-file-chip");
+  chip.hidden = true; chip.innerHTML = "";
+  $("ats-file").value = "";
+}
+
+async function onAtsFile(e) {
+  const f = e.target.files && e.target.files[0];
+  if (!f) return;
+  $("ats-error").hidden = true;
+  const name = f.name.toLowerCase();
+  const chip = $("ats-file-chip");
+  try {
+    if (name.endsWith(".pdf")) {
+      pendingAtsPdf = await fileToBase64(f);
+      chip.hidden = false;
+      chip.innerHTML = `${escapeHtml(f.name)} <span class="chip-x" title="Remove">&times;</span>`;
+    } else {
+      $("ats-input").value = await fileToText(f);
+      pendingAtsPdf = null;
+      chip.hidden = false;
+      chip.innerHTML = `${escapeHtml(f.name)} (loaded below) <span class="chip-x" title="Remove">&times;</span>`;
+    }
+    chip.querySelector(".chip-x").addEventListener("click", clearAtsFile);
+  } catch (err) {
+    $("ats-error").textContent = "Could not read that file.";
+    $("ats-error").hidden = false;
+  }
+}
+
+async function runAtsify() {
+  const err = $("ats-error");
+  err.hidden = true;
+  const text = $("ats-input").value.trim();
+  if (!text && !pendingAtsPdf) {
+    err.textContent = "Upload a résumé (PDF/text/LaTeX) or paste LaTeX/text first.";
+    err.hidden = false;
+    return;
+  }
+  const btn = $("ats-run");
+  setBusy2(btn, true, "Strip to ATS-friendly one page");
+  try {
+    const payload = { model: $("model").value || null };
+    if (text) payload.source_text = text;
+    if (pendingAtsPdf) payload.resume_pdf_base64 = pendingAtsPdf;
+    const r = await fetch("/api/atsify", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await r.json();
+    if (!data.ok) { err.textContent = data.error || "ATS conversion failed."; err.hidden = false; return; }
+    updatePdfPreview(data.pdf_base64, data.tex);
+    $("tex-editor").value = data.tex;
+    $("tex-editor-wrap").hidden = true;
+    $("toggle-tex").textContent = "Edit LaTeX";
+    renderDiff("", null);
+    $("summary-box").hidden = true;
+    const meta = $("result-meta");
+    meta.hidden = false;
+    const who = data.profile_name ? ` (${data.profile_name})` : "";
+    meta.textContent = `${data.pages} page · ATS-stripped${who}`;
+    $("result-empty").hidden = true;
+    $("result-live").hidden = false;
+    if (data.warnings && data.warnings.length) { err.textContent = data.warnings.join(" "); err.hidden = false; }
+    clearAtsFile();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  } catch (e) {
+    err.textContent = "Network error: " + e.message;
+    err.hidden = false;
+  } finally {
+    setBusy2(btn, false, "Strip to ATS-friendly one page");
+  }
 }
 
 // ---- saved profile: view / edit / history ----
@@ -901,6 +982,8 @@ function init() {
     $("toggle-tex").textContent = wrap.hidden ? "Edit LaTeX" : "Hide LaTeX";
   });
   $("recompile-tex").addEventListener("click", recompileTex);
+  $("ats-run").addEventListener("click", runAtsify);
+  $("ats-file").addEventListener("change", onAtsFile);
   $("toggle-diff").addEventListener("click", () => {
     const wrap = $("diff-wrap");
     wrap.hidden = !wrap.hidden;

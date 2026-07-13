@@ -23,13 +23,29 @@ def _esc(s) -> str:
     return _html.escape(str(s or ""))
 
 
-def _hhmm_passed(slot: str, when: datetime) -> bool:
+# A check-in fires at its slot and for a window afterward (so a machine that boots
+# a bit late still sends it), but not hours later - avoids a 2pm boot firing the
+# 11:30 nudge. The recap has no late cap (you always want the day's wrap-up).
+CHECKIN_MAX_LATE_MIN = 75
+
+
+def _minutes_since_slot(slot: str, when: datetime):
     try:
         hh, mm = (int(x) for x in str(slot).split(":", 1))
     except (ValueError, TypeError):
-        return False
+        return None
     target = when.replace(hour=hh, minute=mm, second=0, microsecond=0)
-    return when >= target
+    return (when - target).total_seconds() / 60.0
+
+
+def _hhmm_passed(slot: str, when: datetime) -> bool:
+    m = _minutes_since_slot(slot, when)
+    return m is not None and m >= 0
+
+
+def _checkin_due_now(slot: str, when: datetime) -> bool:
+    m = _minutes_since_slot(slot, when)
+    return m is not None and 0 <= m <= CHECKIN_MAX_LATE_MIN
 
 
 def _mailto(subject: str, body: str) -> str:
@@ -237,25 +253,24 @@ def send_checkins_if_due(when: datetime | None = None) -> dict:
     if sc["done"] >= sc["count"]:
         return {"sent": 0, "reason": "all done"}  # nothing to nudge about
     today = when.strftime("%Y-%m-%d")
-    st = store.load_state()
-    sent_map = st.get("checkins_sent") or {}
-    already = set(sent_map.get(today, []))
     sent = 0
     for slot in (cfg.get("checkin_times") or []):
-        if slot in already or not _hhmm_passed(slot, when):
+        if not _checkin_due_now(slot, when):
+            continue
+        # Cross-process claim so the Windows task and any running server never
+        # double-send the same slot.
+        claim = f"checkin-{today}-{slot}"
+        if not store.claim_once(claim):
             continue
         msg = build_checkin(plan, when, slot)
         try:
             email_send.send_email(to_addr=cfg["email_to"], subject=msg["subject"],
                                   html=msg["html"], text=msg["text"])
         except email_send.EmailError:
+            store.release_claim(claim)  # let a later tick retry
             continue
         dayplan.record_checkin(slot, when)
-        already.add(slot)
         sent += 1
-    if sent:
-        sent_map[today] = sorted(already)
-        store.save_state({"checkins_sent": sent_map})
     return {"sent": sent, "reason": "ok" if sent else "none due"}
 
 
@@ -271,7 +286,8 @@ def send_recap_if_due(when: datetime | None = None) -> dict:
     if not _hhmm_passed(cfg.get("eod_recap_time") or "21:00", when):
         return {"sent": 0, "reason": "before recap time"}
     today = when.strftime("%Y-%m-%d")
-    if store.load_state().get("recap_sent_date") == today:
+    claim = f"recap-{today}"
+    if not store.claim_once(claim):  # cross-process once-per-day guard
         return {"sent": 0, "reason": "already sent"}
     plan, sc = dayplan.finalize_day(when)
     msg = build_recap(plan, sc, when)
@@ -279,8 +295,8 @@ def send_recap_if_due(when: datetime | None = None) -> dict:
         email_send.send_email(to_addr=cfg["email_to"], subject=msg["subject"],
                               html=msg["html"], text=msg["text"])
     except email_send.EmailError as exc:
+        store.release_claim(claim)  # let a later tick retry
         return {"sent": 0, "reason": f"error: {exc}"}
-    store.save_state({"recap_sent_date": today})
     return {"sent": 1, "reason": "ok"}
 
 

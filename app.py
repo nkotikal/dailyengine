@@ -17,7 +17,7 @@ from resume_pipeline.core import load_dotenv
 
 def _send(force: bool) -> int:
     from datetime import datetime
-    from digest_pipeline import digest, email_send
+    from digest_pipeline import checkins, digest, email_send
     stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     if not email_send.is_configured():
         print(f"[{stamp}] ERROR: SMTP not configured (.env).", file=sys.stderr)
@@ -34,6 +34,16 @@ def _send(force: bool) -> int:
         else:
             print(f"[{stamp}] {who}: {r.get('reason', 'not sent')}")
     print(f"[{stamp}] done: {sent} digest(s) sent.")
+
+    # Also dispatch due check-ins + the recap (opt-in, due-time gated, de-duped).
+    try:
+        inter = checkins.run_interactivity_for_all_users(when)
+        ci = sum(x["checkins"].get("sent", 0) for x in inter)
+        rc = sum(x["recap"].get("sent", 0) for x in inter)
+        if ci or rc:
+            print(f"[{stamp}] check-ins sent: {ci}, recaps sent: {rc}.")
+    except Exception as exc:  # noqa: BLE001
+        print(f"[{stamp}] interactivity error: {exc}", file=sys.stderr)
     return 0
 
 

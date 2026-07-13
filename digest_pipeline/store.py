@@ -9,6 +9,7 @@ pipeline's ``data/`` files:
 
 import json
 import os
+import re
 import threading
 import time
 import uuid
@@ -307,6 +308,42 @@ def release_send_slot(date_str: str) -> None:
     """Release a claimed slot (e.g. if the send failed) so a retry can run."""
     try:
         (_dir() / f".sent-{date_str}.lock").unlink()
+    except OSError:
+        pass
+
+
+def _safe_key(key: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_.-]", "_", str(key or ""))[:80]
+
+
+def claim_once(key: str) -> bool:
+    """Atomically claim a one-shot job (e.g. a check-in slot or the recap) ACROSS
+    PROCESSES, so the Windows scheduled task and the in-server scheduler never both
+    fire the same job. Returns True only for the first caller for ``key``."""
+    d = _dir()
+    d.mkdir(parents=True, exist_ok=True)
+    lock = d / f".claim-{_safe_key(key)}.lock"
+    try:
+        fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.write(fd, time.strftime("%Y-%m-%d %H:%M:%S").encode())
+        os.close(fd)
+    except (FileExistsError, OSError):
+        return False
+    # Best-effort cleanup of claim files older than a week.
+    cutoff = time.time() - 7 * 86400
+    for p in d.glob(".claim-*.lock"):
+        try:
+            if p.stat().st_mtime < cutoff:
+                p.unlink()
+        except OSError:
+            pass
+    return True
+
+
+def release_claim(key: str) -> None:
+    """Release a claimed job (e.g. if its send failed) so a later tick can retry."""
+    try:
+        (_dir() / f".claim-{_safe_key(key)}.lock").unlink()
     except OSError:
         pass
 

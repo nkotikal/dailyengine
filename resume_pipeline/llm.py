@@ -137,6 +137,19 @@ If they ask to "unpin" it, convert it back to a plain string.
 - When you must cut for one page, cut UNPINNED, least-relevant bullets first. Pinned \
 bullets are floors, not candidates for removal.
 
+STRATEGIC BOLDING (the ** marker; controlled by the candidate's BOLDING directive):
+- Wrap short, high-impact spans in bullet text (and, sparingly, key skills) with \
+**double asterisks** to render them bold, e.g. "cut p95 latency by **38%**" or \
+"built a **Kubernetes** operator".
+- Use it SPARINGLY and strategically: at most 1-2 short spans per bullet -- the key \
+metric/outcome and/or the single most important term. NEVER bold whole sentences, \
+and do not bold the same generic word in every bullet.
+- Keep ** markers balanced, around plain text only. Preserve existing ** across \
+iterations unless the BOLDING directive or instructions change it.
+- Follow the BOLDING directive: if ON (optionally with a focus like "metrics" or \
+"technologies"), apply that; if OFF, add no new ** markers; if asked to remove \
+bolding, strip existing ** markers.
+
 Return the optimized profile JSON (with "keywords", "gaps", and "summary") now."""
 
 
@@ -168,6 +181,7 @@ def _build_user_message(
     is_iteration: bool = False,
     new_notes: str = "",
     instructions: str = "",
+    bold_directive: str = "",
 ) -> str:
     parts = [
         "JOB DESCRIPTION:\n" + job_description.strip(),
@@ -193,6 +207,8 @@ def _build_user_message(
             "NEW NOTES FROM CANDIDATE (truthful facts to incorporate; keep other "
             "prior edits):\n" + new_notes.strip()
         )
+    if bold_directive and bold_directive.strip():
+        parts.append(bold_directive.strip())
     return "\n\n".join(parts)
 
 
@@ -364,6 +380,8 @@ def optimize_profile(
     is_iteration: bool = False,
     new_notes: str = "",
     instructions: str = "",
+    bold: bool = False,
+    bold_spec: str = "",
 ) -> tuple:
     """Return an LLM-optimized profile (same schema) for the given job description.
 
@@ -378,9 +396,17 @@ def optimize_profile(
     if not job_description or not job_description.strip():
         raise LLMError("A job description is required for LLM optimization.")
 
+    if bold:
+        focus = bold_spec.strip() or ("the single most important metric/outcome and "
+                                      "the top technical term in each bullet")
+        bold_directive = (f"BOLDING: ON. Add strategic **bold** to: {focus}. Keep it "
+                          "sparse (1-2 short spans per bullet); don't bold whole lines.")
+    else:
+        bold_directive = ("BOLDING: OFF. Do not add new ** bold markers "
+                          "(keep any existing ones unless asked to remove them).")
     user = _build_user_message(
         profile, job_description, is_iteration=is_iteration, new_notes=new_notes,
-        instructions=instructions,
+        instructions=instructions, bold_directive=bold_directive,
     )
     if extra_context and extra_context.strip():
         user += (
