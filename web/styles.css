@@ -120,6 +120,16 @@ html[data-theme="neon"] {
   --blob-1: #00e5ff; --blob-2: #ff2bd6; --blob-3: #7c4dff; --blob-4: #00ffa3;
 }
 
+/* Ultraviolet - electric indigo built around #3600ff */
+html[data-theme="ultraviolet"] {
+  --accent: #3600ff; --accent-2: #8b5cff;
+  --accent-soft: rgba(54,0,255,0.22); --accent-brd: rgba(54,0,255,0.50);
+  --accent-glow: rgba(54,0,255,0.55);
+  --glass-brd: rgba(120,90,255,0.26);
+  --bg-gradient: radial-gradient(140% 120% at 15% 10%, #1b1049 0%, #110a31 45%, #06040f 100%);
+  --blob-1: #3600ff; --blob-2: #6a3dff; --blob-3: #9d4bff; --blob-4: #3d5cff;
+}
+
 /* Daylight - clean light mode for people who prefer bright UIs */
 html[data-theme="daylight"] {
   --text: #1b2333;
