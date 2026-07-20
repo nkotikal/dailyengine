@@ -62,6 +62,8 @@
     const lang = ($("d-language") && $("d-language").value) || "korean";
     if ($("d-korean-opts")) $("d-korean-opts").hidden = lang !== "korean";
     if ($("d-english-opts")) $("d-english-opts").hidden = lang !== "english";
+    // Grading (own example sentences) is a Korean-track feature.
+    if ($("d-korean-grade-box")) $("d-korean-grade-box").hidden = lang !== "korean";
     // Clear a stale lesson preview when switching languages.
     if ($("d-korean-out")) { $("d-korean-out").hidden = true; $("d-korean-out").innerHTML = ""; }
   }
@@ -133,6 +135,10 @@
       checkin_times: $("d-checkin-times")
         ? $("d-checkin-times").value.split(",").map((s) => s.trim()).filter(Boolean)
         : [],
+      checkin_scope: ($("d-checkin-scope") && $("d-checkin-scope").value) || "up_to_now",
+      checkin_show_score: $("d-checkin-score") ? $("d-checkin-score").checked : true,
+      checkin_show_later: $("d-checkin-later") ? $("d-checkin-later").checked : true,
+      checkin_show_hint: $("d-checkin-hint") ? $("d-checkin-hint").checked : true,
       eod_recap_enabled: $("d-recap") ? $("d-recap").checked : false,
       eod_recap_time: ($("d-recap-time") && $("d-recap-time").value) || "21:00",
     };
@@ -169,6 +175,10 @@
     if (cfg.openai_model) $("d-openai-model").value = cfg.openai_model;
     if ($("d-checkins")) $("d-checkins").checked = !!cfg.checkins_enabled;
     if ($("d-checkin-times")) $("d-checkin-times").value = (cfg.checkin_times || []).join(", ");
+    if ($("d-checkin-scope")) $("d-checkin-scope").value = cfg.checkin_scope || "up_to_now";
+    if ($("d-checkin-score")) $("d-checkin-score").checked = cfg.checkin_show_score !== false;
+    if ($("d-checkin-later")) $("d-checkin-later").checked = cfg.checkin_show_later !== false;
+    if ($("d-checkin-hint")) $("d-checkin-hint").checked = cfg.checkin_show_hint !== false;
     if ($("d-recap")) $("d-recap").checked = !!cfg.eod_recap_enabled;
     if ($("d-recap-time")) $("d-recap-time").value = cfg.eod_recap_time || "21:00";
   }
@@ -614,15 +624,21 @@
   async function parseSchedule() {
     showError("");
     const btn = $("d-parse");
+    const forWhen = ($("d-schedule-for") && $("d-schedule-for").value) || "today";
     setBusy(btn, true, "Parse & save");
     try {
       const r = await fetch("/api/digest/schedule", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ raw: $("d-schedule").value }),
+        body: JSON.stringify({ raw: $("d-schedule").value, for: forWhen }),
       });
       const data = await r.json();
       if (!data.ok) { showError(data.error || "Parse failed."); return; }
       renderParsed(data.parsed);
+      const note = $("d-cal-note");
+      if (note && data.for_date) {
+        const label = data.for_date === new Date().toISOString().slice(0, 10) ? "today" : data.for_date;
+        note.innerHTML = `Saved for <strong>${label}</strong> \u00b7 ${(data.counts && data.counts.tasks) || 0} task(s).`;
+      }
       loadStatus();
     } catch (e) { showError("Network error: " + e.message); }
     finally { setBusy(btn, false, "Parse & save"); }
@@ -994,6 +1010,101 @@
       setTimeout(() => { st.textContent = ""; }, 2500);
       loadStatus();
     } catch (e) { showError("Network error: " + e.message); }
+  }
+
+  async function gradeKorean() {
+    showError("");
+    const raw = ($("d-korean-practice") && $("d-korean-practice").value || "").trim();
+    if (!raw) { showError("Write one or more Korean sentences to grade."); return; }
+    const btn = $("d-korean-grade");
+    setBusy(btn, true, "Grade my sentences");
+    try {
+      const r = await fetch("/api/digest/korean/grade", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sentences: raw }),
+      });
+      const data = await r.json();
+      if (!data.ok) { showError(data.error || "Grading failed."); return; }
+      renderGradedResults(data.results || []);
+      loadStatus();  // refresh the scoreboard from updated practice stats
+    } catch (e) { showError("Network error: " + e.message); }
+    finally { setBusy(btn, false, "Grade my sentences"); }
+  }
+
+  function renderGradedResults(results) {
+    const box = $("d-korean-graded");
+    if (!box) return;
+    if (!results.length) { box.hidden = true; box.innerHTML = ""; return; }
+    box.hidden = false;
+    const pass = 70;
+    box.innerHTML = results.map((r) => {
+      const passed = (r.score || 0) >= pass;
+      const cls = passed ? "pass" : "fail";
+      const showFix = r.corrected && r.corrected.trim() &&
+        r.corrected.trim() !== (r.sentence || "").trim();
+      return `<div class="d-score-item ${cls}">
+        <div class="d-score-item-top">
+          <span class="d-score-sent">${escapeHtml(r.sentence || "")}</span>
+          <span class="d-score-badge ${cls}">${r.score}</span>
+        </div>
+        ${showFix ? `<div class="d-score-fix"><strong>Better:</strong> ${escapeHtml(r.corrected)}</div>` : ""}
+        ${r.feedback ? `<div class="d-score-fb">${escapeHtml(r.feedback)}</div>` : ""}
+      </div>`;
+    }).join("");
+    if ($("d-korean-practice")) $("d-korean-practice").value = "";
+  }
+
+  function _reportNote(html, cls) {
+    const note = $("d-report-note");
+    if (!note) return;
+    note.hidden = false;
+    note.innerHTML = `<div class="d-report-conf ${cls || "ok"}">${html}</div>`;
+  }
+
+  function renderReportResult(data) {
+    const sc = data.score || {};
+    if (data.completed_count === 0) {
+      _reportNote(`Parsed <strong>${data.parsed_tasks}</strong> line(s), but none were marked with <code>#</code>. Start a line with <code>#</code> to log it as completed.`, "warn");
+      return;
+    }
+    const ICON = { done: "\u2705", already_done: "\u2705", added: "\u2795" };
+    const TAIL = { done: "", already_done: " (was already done)", added: " \u2014 logged (wasn't in the plan)" };
+    const rows = (data.items || []).map((it) =>
+      `<div style="padding:3px 0;font-size:13.5px;">${ICON[it.status] || "\u2022"} ${escapeHtml(it.text)}` +
+      `<span style="color:var(--text-faint);">${TAIL[it.status] || ""}</span></div>`
+    ).join("");
+    const bits = [`<strong>${data.matched}</strong> matched`];
+    if (data.added) bits.push(`<strong>${data.added}</strong> added`);
+    if (data.newly_done) bits.push(`<strong>${data.newly_done}</strong> newly done`);
+    const summary = `Logged ${bits.join(" \u00b7 ")}` +
+      (sc.total != null ? ` \u00b7 today <strong>${sc.done}/${sc.count}</strong> \u00b7 ${sc.total} pts` : "");
+    _reportNote(`<div style="font-weight:600;margin-bottom:6px;">\u2713 ${summary}</div>${rows}`, "ok");
+  }
+
+  async function submitReport() {
+    showError("");
+    const raw = ($("d-report") && $("d-report").value || "").trim();
+    if (!raw) { _reportNote("Paste your day first (use <code>#</code> to mark completed tasks).", "warn"); return; }
+    const btn = $("d-report-submit");
+    setBusy(btn, true, "Log completed");
+    _reportNote("Logging\u2026", "ok");
+    try {
+      const r = await fetch("/api/digest/report", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ raw }),
+      });
+      let data = null;
+      try { data = await r.json(); } catch (e) { data = null; }
+      if (!r.ok || !data) {
+        _reportNote(`Couldn't reach the report endpoint (HTTP ${r.status}). Restart the server so the new route loads, then hard-refresh this page.`, "warn");
+        return;
+      }
+      if (!data.ok) { _reportNote(escapeHtml(data.error || "Could not apply report."), "warn"); return; }
+      renderReportResult(data);
+      loadStatus();
+    } catch (e) {
+      _reportNote("Network error: " + escapeHtml(e.message) + ". Is the server running?", "warn");
+    } finally { setBusy(btn, false, "Log completed"); }
   }
 
   async function previewKorean() {
@@ -1488,7 +1599,8 @@
     ["d-checkins", "d-recap"].forEach((id) => {
       if ($(id)) $(id).addEventListener("change", () => { saveConfig(true).then(loadStatus); });
     });
-    ["d-checkin-times", "d-recap-time"].forEach((id) => {
+    ["d-checkin-times", "d-recap-time", "d-checkin-scope", "d-checkin-score",
+     "d-checkin-later", "d-checkin-hint"].forEach((id) => {
       if ($(id)) $(id).addEventListener("change", () => saveConfig(true));
     });
     // in-page sub-tab navigation
@@ -1504,6 +1616,10 @@
     try { savedMemSub = localStorage.getItem("memorySub") || "memories"; } catch (e) { /* ignore */ }
     switchMemorySub(savedMemSub);
     // schedule
+    if ($("d-schedule-for")) {
+      // Evening saves are almost always for the next morning.
+      $("d-schedule-for").value = new Date().getHours() >= 18 ? "tomorrow" : "today";
+    }
     $("d-parse").addEventListener("click", parseSchedule);
     $("d-push-cal").addEventListener("click", pushCalendar);
     // trackers
@@ -1511,6 +1627,8 @@
     $("d-tracker-test").addEventListener("click", testTracker);
     // korean
     $("d-korean-preview").addEventListener("click", previewKorean);
+    if ($("d-korean-grade")) $("d-korean-grade").addEventListener("click", gradeKorean);
+    if ($("d-report-submit")) $("d-report-submit").addEventListener("click", submitReport);
     $("d-korean-place").addEventListener("click", setPlacement);
     $("d-reminder-add").addEventListener("click", addReminder);
     $("d-reminder-text").addEventListener("keydown", (e) => {

@@ -64,13 +64,47 @@ def refresh_from_store(plan: dict) -> dict:
     return plan
 
 
-def build_day_plan(when: datetime | None = None, *, rebuild: bool = False) -> dict:
-    """Snapshot today's numbered plan (idempotent per date). Returns the plan dict."""
-    when = when or datetime.now()
-    key = _key(when)
-    plan = store.load_dayplan()
-    if plan.get("date") == key and plan.get("tasks") and not rebuild:
-        return refresh_from_store(plan)
+def _schedule_plan_items(when: datetime):
+    """Today's numbered plan straight from the daily SCHEDULE (the hour-blocked
+    planner), when one was saved FOR today. Each 1-tab task under an hour becomes a
+    numbered item carrying its scheduled hour, so intraday check-ins can focus on
+    what's due 'up to now'. Returns None when there's no schedule for today.
+    """
+    sched = store.load_schedule()
+    if (sched.get("for_date") or "") != _key(when):
+        return None  # no schedule specifically for today -> fall back to weekly tasks
+    parsed = sched.get("parsed") or {}
+    items = []
+    idx = 1
+    for b in parsed.get("blocks", []) or []:
+        if b.get("day_offset"):
+            continue  # skip next-day blocks (e.g. midnight SLEEP)
+        h = b.get("hour24")
+        h = h if (h is not None and h >= 0) else None
+        for t in b.get("tasks", []) or []:
+            txt = (t.get("text") or "").strip()
+            if not txt:
+                continue
+            pr = "high" if t.get("important") else "medium"
+            detail = "; ".join(s.get("text", "") for s in (t.get("subtasks") or []) if s.get("text"))
+            items.append({
+                "idx": idx,
+                "node_id": "",                     # schedule items aren't weekly nodes
+                "text": txt,
+                "priority": pr,
+                "points": POINTS.get(pr, 2),
+                "annotation": b.get("time_str", ""),
+                "detail": detail,                   # 2-tab lines = extra info
+                "sched_hour": h,
+                "done": False,
+                "done_at": "",
+            })
+            idx += 1
+    return items or None
+
+
+def _weekly_plan_items(when: datetime) -> list:
+    """Fallback plan from the triaged weekly tasks (used when no schedule is set)."""
     items = []
     for i, t in enumerate(_focus_tasks(when), 1):
         pr = tasks._max_priority(t)
@@ -81,12 +115,30 @@ def build_day_plan(when: datetime | None = None, *, rebuild: bool = False) -> di
             "priority": pr,
             "points": POINTS.get(pr, 2),
             "annotation": tasks.triage_score(t, when.date())["annotation"],
+            "sched_hour": None,
             "done": bool(t.get("done")),
             "done_at": "",
         })
+    return items
+
+
+def build_day_plan(when: datetime | None = None, *, rebuild: bool = False) -> dict:
+    """Snapshot today's numbered plan (idempotent per date). Returns the plan dict.
+
+    Sourced from the daily SCHEDULE when one exists for today (so the accountability
+    loop tracks your actual planned day); otherwise from the triaged weekly tasks.
+    """
+    when = when or datetime.now()
+    key = _key(when)
+    plan = store.load_dayplan()
+    if plan.get("date") == key and plan.get("tasks") and not rebuild:
+        return refresh_from_store(plan)
+    sched_items = _schedule_plan_items(when)
+    items = sched_items if sched_items else _weekly_plan_items(when)
     plan = {
         "date": key,
         "created_at": _stamp(when),
+        "source": "schedule" if sched_items else "weekly",
         "tasks": items,
         "checkins": [],
         "response_bonus": 0,
@@ -155,6 +207,109 @@ def mark_node_ids(node_ids, when: datetime | None = None, *, done: bool = True) 
     if changed:
         store.save_dayplan(plan)
     return {"changed": changed, "score": score(plan)}
+
+
+def _norm(s: str) -> str:
+    return re.sub(r"[^a-z0-9 ]", "", (s or "").lower()).strip()
+
+
+def mark_done_by_text(texts, when: datetime | None = None, *, done: bool = True) -> dict:
+    """Mark today's plan tasks done/undone by fuzzy text match (used by daily report)."""
+    when = when or datetime.now()
+    plan = build_day_plan(when)
+    targets = [_norm(t) for t in (texts or []) if _norm(t)]
+    changed = []
+    for t in plan.get("tasks", []):
+        nt = _norm(t.get("text", ""))
+        if not nt:
+            continue
+        if any(tg == nt or (len(tg) >= 3 and (tg in nt or nt in tg)) for tg in targets):
+            if bool(t.get("done")) != done:
+                t["done"] = done
+                t["done_at"] = _stamp(when) if done else ""
+                if t.get("node_id"):
+                    store.update_node(t["node_id"], {"done": done})
+                changed.append(t["idx"])
+    if changed:
+        store.save_dayplan(plan)
+    return {"changed": changed, "score": score(plan)}
+
+
+def parse_report(raw: str):
+    """Parse a daily-report paste (schedule layout). A line whose task text starts
+    with '#' means that task was COMPLETED. Returns (completed_texts, all_texts)."""
+    completed, all_texts = [], []
+    for line in (raw or "").splitlines():
+        s = line.strip()
+        if not s or re.match(r"^\d{1,2}$", s):  # blank or an hour marker
+            continue
+        s = s.lstrip("-*\u2022").strip()
+        is_done = s.startswith("#")
+        text = s.lstrip("#").strip().lstrip("'").strip()
+        if not text:
+            continue
+        all_texts.append(text)
+        if is_done:
+            completed.append(text)
+    return completed, all_texts
+
+
+def apply_report(raw: str, when: datetime | None = None) -> dict:
+    """Apply a pasted daily report to TODAY's plan: '#'-prefixed lines are completed.
+
+    - A completed line that matches a task in today's plan marks it done.
+    - A completed line that ISN'T in the plan is ADDED as a done task (you often
+      finish things that weren't scheduled - they still count).
+    Targets today's plan snapshot, so a schedule you've since saved FOR TOMORROW
+    doesn't interfere. Returns per-item detail for a clear UI confirmation.
+    """
+    when = when or datetime.now()
+    completed, all_texts = parse_report(raw)
+    plan = build_day_plan(when)
+    tasks_list = plan.setdefault("tasks", [])
+    plan_norm = [(t, _norm(t.get("text", ""))) for t in tasks_list]
+    next_idx = max((t.get("idx", 0) for t in tasks_list), default=0) + 1
+
+    items, newly_done, added = [], 0, 0
+    for c in completed:
+        nc = _norm(c)
+        match = None
+        for t, nt in plan_norm:
+            if nt and (nc == nt or (len(nc) >= 3 and (nc in nt or nt in nc))):
+                match = t
+                break
+        if match:
+            if match.get("done"):
+                items.append({"text": c, "status": "already_done"})
+            else:
+                match["done"] = True
+                match["done_at"] = _stamp(when)
+                if match.get("node_id"):
+                    store.update_node(match["node_id"], {"done": True})
+                newly_done += 1
+                items.append({"text": c, "status": "done"})
+        else:
+            new_t = {"idx": next_idx, "node_id": "", "text": c, "priority": "medium",
+                     "points": POINTS["medium"], "annotation": "logged", "sched_hour": None,
+                     "done": True, "done_at": _stamp(when), "added_from_report": True}
+            tasks_list.append(new_t)
+            plan_norm.append((new_t, nc))
+            next_idx += 1
+            added += 1
+            items.append({"text": c, "status": "added"})
+
+    if newly_done or added:
+        store.save_dayplan(plan)
+    return {
+        "completed_count": len(completed),
+        "parsed_tasks": len(all_texts),
+        "matched": sum(1 for i in items if i["status"] in ("done", "already_done")),
+        "added": added,
+        "newly_done": newly_done,
+        "items": items,
+        "score": score(plan),
+        "has_plan": bool(tasks_list),
+    }
 
 
 def record_checkin(slot: str, when: datetime | None = None) -> dict:

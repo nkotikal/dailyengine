@@ -6,12 +6,13 @@ Isolated from the resume pipeline. Uses ``store`` for data, ``llm`` to compose
 
 import html as _html
 import re
+from urllib.parse import quote
 from datetime import datetime, date
 
 import user_context
 
 from . import (dayplan, email_send, english, gcal, inbox_commands, korean, llm,
-               memory, news, schedule, store, tasks, trackers)
+               memory, news, schedule, schedule_gen, store, tasks, trackers)
 
 # Language practice tracks (the "korean_enabled" flag is the generic on/off switch).
 _LANG_META = {
@@ -28,6 +29,18 @@ DETAIL_TITLES = {
     "calendar", "korean practice", "english vocabulary", "language practice",
     "completed", "long-term goals",
 }
+
+
+def _reminder_done_link(text: str) -> str:
+    """A one-tap mailto that replies 'Reminder done: <text>' so it closes reliably."""
+    try:
+        to = email_send.from_address()
+    except Exception:  # noqa: BLE001
+        to = ""
+    if not to or not (text or "").strip():
+        return ""
+    body = f"Reminder done: {text.strip()}"
+    return f"mailto:{quote(to)}?subject={quote('Reminder update')}&body={quote(body)}"
 
 
 def _reminders_view(when: datetime):
@@ -534,15 +547,31 @@ def build_digest(cfg: dict | None = None, *, when: datetime | None = None,
         if stored_parsed and for_date == today_key:
             parsed_schedule = stored_parsed
             schedule_text = schedule.render_text(parsed_schedule)
-        elif stored_parsed:
-            schedule_note = (f"No schedule was set for today; the last saved plan was for "
-                             f"{for_date or 'a previous day'}. Suggest a light, realistic "
-                             f"plan for today from the open tasks and deadlines, and note "
-                             f"it's an auto-suggestion (not one I gave you).")
         else:
-            schedule_note = ("No schedule was provided for today. Optionally suggest a "
-                             "light plan from the open tasks and deadlines, noting it's "
-                             "an auto-suggestion.")
+            # No schedule provided for today -> auto-assemble one (on a real send) from
+            # the goals/tasks, deadlines, and recurring patterns in past schedules, and
+            # save it FOR today so the check-in loop tracks concrete daily tasks.
+            gen = None
+            if consume and not offline:
+                try:
+                    gen = schedule_gen.generate_and_save(when, model=(cfg.get("model") or None))
+                except Exception as exc:  # noqa: BLE001
+                    warnings.append(f"Schedule generation failed ({exc}).")
+            if gen:
+                parsed_schedule = gen["parsed"]
+                schedule_text = schedule.render_text(parsed_schedule)
+                schedule_note = ("This schedule was auto-assembled from your goals, "
+                                 "deadlines, and your usual daily patterns (you didn't "
+                                 "provide one). Adjust by replying with how you want the day.")
+            elif stored_parsed:
+                schedule_note = (f"No schedule was set for today; the last saved plan was for "
+                                 f"{for_date or 'a previous day'}. Suggest a light, realistic "
+                                 f"plan for today from the open tasks and deadlines, and note "
+                                 f"it's an auto-suggestion (not one I gave you).")
+            else:
+                schedule_note = ("No schedule was provided for today. Optionally suggest a "
+                                 "light plan from the open tasks and deadlines, noting it's "
+                                 "an auto-suggestion.")
 
     calendar_events = []
     calendar_text = ""
@@ -795,13 +824,17 @@ def render_html(data: dict, when_human: str) -> str:
             due = x.get("due") or ""
             due_html = (f" <span style='color:#ffd9d9;font-weight:600;font-size:14px;'>({_esc(due)})</span>"
                         if due else "")
+            done_link = _reminder_done_link(x.get("text", ""))
+            done_html = (f' <a href="{_esc(done_link)}" style="color:#5fe6b4;font-size:13px;'
+                         f'font-weight:800;text-decoration:none;white-space:nowrap;">[\u2713 done]</a>'
+                         if done_link else "")
             rows_html.append(
                 f'<div style="padding:8px 0;border-top:1px solid rgba(255,255,255,0.12);">'
                 f'<span style="background:{tagbg};color:#1a0000;font-size:11px;font-weight:800;'
                 f'letter-spacing:.4px;padding:2px 7px;border-radius:5px;margin-right:8px;'
                 f'white-space:nowrap;">{_esc(tag)}</span>'
                 f'<span style="font-size:17px;line-height:1.5;color:#fff;font-weight:700;">'
-                f'{_esc(x.get("text",""))}{due_html}</span></div>'
+                f'{_esc(x.get("text",""))}{due_html}</span>{done_html}</div>'
             )
         parts.append(
             f'<div style="margin:16px 2px 0;padding:14px 18px;border-radius:14px;'

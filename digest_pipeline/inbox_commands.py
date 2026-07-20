@@ -14,7 +14,7 @@ from email.header import decode_header
 
 from datetime import datetime, timedelta
 
-from . import dayplan, korean, llm, memory, schedule, store, tasks
+from . import dayplan, email_send, korean, llm, memory, schedule, store, tasks
 
 
 def _imap_cfg():
@@ -132,6 +132,7 @@ a JSON object:
   "add_tasks": [{"text": "...", "priority": "critical|high|medium|low", "due": "YYYY-MM-DD or ''",
                  "parent": "optional: text of the task to nest this under"}],
   "reminders": [{"text": "a deadline/commitment", "due": "YYYY-MM-DD", "priority": "high|medium|low"}],
+  "completed_reminders": ["text of an existing deadline/reminder they say is DONE or no longer needed"],
   "blockers": [{"type": "time|blocked|motivation|scope|health|other", "text": "what is holding them back"}],
   "mood": "great|good|ok|rough|bad or ''",
   "progress_quality": "strong|solid|mixed|thin|poor or ''",
@@ -152,6 +153,10 @@ RULES:
   time ("mid-internship presentation due next Friday") MUST go in "reminders" with an
   absolute "due" date. Resolve relative dates ("next Friday", "in two weeks", "by end
   of month") to YYYY-MM-DD using TODAY'S DATE given below. Never drop a deadline.
+- CLOSING DEADLINES: if the reply says a deadline/commitment is DONE, submitted, or no
+  longer needed ("finished the midyear presentation", "sent the report", "IUG sorted"),
+  put the matching reminder's wording in "completed_reminders" so it stops nagging.
+  The current active reminders are listed below - match against them.
 - "complete": match the user's wording to their existing tasks (listed below).
 - "accomplished": what they did today (feeds "What's New" and long-term memory).
 - "blockers": things impeding them (e.g. "lacking time", "blocked by xyz conflict",
@@ -208,11 +213,58 @@ def _find_node_id_by_text(phrase: str):
     return best if best_score > 0 else None
 
 
+_REMINDER_DONE_RE = re.compile(
+    r"(?:reminder[s]?\s+)?(?:done|did|finished|complete[d]?|submitted|sent|handled|"
+    r"resolved|took\s+care\s+of|wrapped\s+up)\b[:\-]?\s*(.+)", re.I)
+
+
+def _deterministic_reminder_phrases(body: str) -> list:
+    """Pull 'I finished X' style phrases from a reply WITHOUT the LLM, so one-tap
+    'Reminder done: ...' links and plain 'finished the report' replies close reminders
+    even when the AI is unreachable."""
+    phrases = []
+    for line in (body or "").splitlines():
+        m = _REMINDER_DONE_RE.search(line.strip())
+        if m:
+            p = m.group(1).strip(" .!,")
+            # Ignore bare index lists like "1 3" (those are check-in commands).
+            if re.search(r"[a-zA-Z]{3,}", p):
+                phrases.append(p)
+    return phrases
+
+
+def _close_reminders_by_text(phrases: list) -> int:
+    """Mark active reminders done when a phrase matches (word-overlap/containment)."""
+    closed = 0
+    active = store.active_reminders()
+    for phrase in phrases or []:
+        p = (phrase or "").strip().lower()
+        if not p:
+            continue
+        best, best_score = None, 0
+        for r in active:
+            t = (r.get("text") or "").lower()
+            if not t or r.get("id") in {x for x in []}:
+                continue
+            if p in t or t in p:
+                sc = max(len(p), 1)
+            else:
+                sc = len(set(p.split()) & set(t.split()))
+            if sc > best_score:
+                best, best_score = r, sc
+        # Require a reasonably strong match so we don't close the wrong deadline.
+        if best and best_score >= 2:
+            if store.update_reminder(best["id"], {"done": True}):
+                closed += 1
+                active = [r for r in active if r.get("id") != best["id"]]
+    return closed
+
+
 def _apply(actions: dict, *, model: str | None = None) -> dict:
-    applied = {"completed": 0, "added": 0, "reminders": 0, "accomplished": 0,
-               "interests_added": 0, "interests_removed": 0, "prefs": 0,
+    applied = {"completed": 0, "added": 0, "reminders": 0, "reminders_closed": 0,
+               "accomplished": 0, "interests_added": 0, "interests_removed": 0, "prefs": 0,
                "reflection": False, "schedule_tomorrow": False, "weekly_targets": 0,
-               "memory": {"added": 0, "updated": 0}}
+               "korean_graded": 0, "memory": {"added": 0, "updated": 0}}
     for phrase in actions.get("complete") or []:
         nid = _find_node_id_by_text(phrase)
         if nid and store.update_node(nid, {"done": True}):
@@ -238,6 +290,13 @@ def _apply(actions: dict, *, model: str | None = None) -> dict:
         pr = pr if pr in ("low", "medium", "high") else "medium"
         store.add_reminder(rem["text"], due=(rem.get("due") or "").strip(), priority=pr)
         applied["reminders"] += 1
+
+    # Close deadlines the user reports handled, so they stop showing up overdue.
+    # Also close any reminder that matches a task/accomplishment they marked done.
+    close_phrases = list(actions.get("completed_reminders") or [])
+    close_phrases += list(actions.get("complete") or [])
+    close_phrases += [str(a) for a in (actions.get("accomplished") or [])]
+    applied["reminders_closed"] = _close_reminders_by_text(close_phrases)
 
     # Accomplishments -> "What's New" updates (folded into memory below too).
     accomplished = [str(a).strip() for a in (actions.get("accomplished") or []) if str(a).strip()]
@@ -333,6 +392,16 @@ def _apply(actions: dict, *, model: str | None = None) -> dict:
                     if n:
                         store.save_korean(kstate)
                         applied["korean_completed"] = n
+                # Email the feedback right away so it isn't buried until tomorrow.
+                try:
+                    to_addr = (store.load_config().get("email_to") or "").strip()
+                    if to_addr and email_send.is_configured():
+                        msg = korean.build_practice_feedback(results, today)
+                        email_send.send_email(to_addr=to_addr, subject=msg["subject"],
+                                              html=msg["html"], text=msg["text"])
+                        applied["korean_feedback_sent"] = True
+                except email_send.EmailError:
+                    pass
         except llm.DigestLLMError:
             pass
     return applied
@@ -363,18 +432,28 @@ def process_replies(*, model: str | None = None, deterministic_only: bool = Fals
     deferred = False
     for r in replies:
         body = r["body"]
+        # Always attempt a deterministic reminder-close (works offline, and closes
+        # one-tap 'Reminder done: ...' links regardless of the LLM). Idempotent.
+        det_closed = _close_reminders_by_text(_deterministic_reminder_phrases(body))
         if deterministic_only:
-            # Offline: only consume replies that are clearly just check-in commands.
-            if dayplan.looks_like_checkin(body):
-                results.append({"checkin": dayplan.apply_reply(body, now)})
+            # Offline: consume replies that are clearly check-in commands or that just
+            # closed a reminder (so a one-tap 'done' reply is marked handled).
+            if dayplan.looks_like_checkin(body) or det_closed:
+                ci = dayplan.apply_reply(body, now) if dayplan.looks_like_checkin(body) else {}
+                results.append({"checkin": ci, "reminders_closed": det_closed})
                 store.mark_reply_processed(r["mid"])
                 processed += 1
             continue
+        active_rems = store.active_reminders()
+        rem_texts = "\n".join(
+            f"- {r.get('text','')}" + (f" (due {r['due']})" if r.get("due") else "")
+            for r in active_rems) or "(none)"
         try:
             actions = llm.post_json(
                 PARSE_SYSTEM,
                 f"TODAY'S DATE: {today} ({weekday}). Resolve all relative dates to "
                 f"absolute YYYY-MM-DD from this.\n\nCURRENT OPEN TASKS:\n{open_texts}\n\n"
+                f"ACTIVE REMINDERS/DEADLINES (match 'completed_reminders' to these):\n{rem_texts}\n\n"
                 f"MY REPLY:\n{body}",
                 model=model, temperature=0, max_tokens=2000)
         except llm.DigestLLMError as exc:

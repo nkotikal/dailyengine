@@ -14,7 +14,12 @@ import argparse
 import base64
 import json
 import os
+import re
+import threading
+import time
 import traceback
+import urllib.parse
+import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -42,10 +47,40 @@ from digest_pipeline import inbox_commands as digest_replies
 from digest_pipeline.email_send import EmailError
 from digest_pipeline.gcal import GCalError
 from digest_pipeline.llm import DigestLLMError
-from datetime import datetime
+from datetime import datetime, timedelta
 
 ROOT = Path(__file__).resolve().parent
 WEB = app_paths.bundle_dir() / "web"
+
+# In-memory registry for async resume-generation jobs (so the UI can poll accurate
+# progress). Each entry: {percent, stage, done, result, ts}.
+_GEN_JOBS = {}
+_GEN_LOCK = threading.Lock()
+
+# Build/version marker so the UI can detect a stale server instance.
+SERVER_VERSION = "2026-07-19-async-progress"
+
+
+def _log(msg: str):
+    """Append a timestamped line to <data>/server.log and echo to stderr."""
+    line = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}"
+    try:
+        import sys as _sys
+        print(line, file=_sys.stderr, flush=True)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        with open(app_paths.data_dir() / "server.log", "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _prune_gen_jobs(max_age: float = 900.0):
+    now = time.time()
+    with _GEN_LOCK:
+        for jid in [k for k, v in _GEN_JOBS.items() if now - v.get("ts", now) > max_age]:
+            _GEN_JOBS.pop(jid, None)
 
 _CONTENT_TYPES = {
     ".html": "text/html; charset=utf-8",
@@ -89,6 +124,8 @@ class Handler(BaseHTTPRequestHandler):
             self._serve_file("index.html")
         elif self.path == "/api/status":
             self._status()
+        elif self.path.startswith("/api/generate/status"):
+            self._generate_status()
         elif self.path == "/api/users":
             self._users_list()
         elif self.path == "/api/profile":
@@ -123,6 +160,8 @@ class Handler(BaseHTTPRequestHandler):
             self._compile_tex()
         elif self.path == "/api/atsify":
             self._atsify()
+        elif self.path == "/api/ats-text":
+            self._ats_text()
         elif self.path == "/api/profile/save":
             self._profile_save()
         elif self.path == "/api/profile/version":
@@ -157,6 +196,10 @@ class Handler(BaseHTTPRequestHandler):
             self._digest_korean_preview()
         elif self.path == "/api/digest/korean/placement":
             self._digest_korean_placement()
+        elif self.path == "/api/digest/korean/grade":
+            self._digest_korean_grade()
+        elif self.path == "/api/digest/report":
+            self._digest_report()
         elif self.path == "/api/digest/reminder/add":
             self._digest_reminder_add()
         elif self.path == "/api/digest/reminder/update":
@@ -264,6 +307,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def _status(self):
         self._send_json(200, {
+            "server_version": SERVER_VERSION,
+            "async_generate": True,
             "profile_stored": store.has_profile(),
             "profile_name": store.profile_name(),
             "has_optimized": store.has_optimized(),
@@ -475,10 +520,22 @@ class Handler(BaseHTTPRequestHandler):
             return
         raw = data.get("raw", "") if isinstance(data, dict) else ""
         parsed = digest_schedule.parse_schedule(raw)
-        digest_store.save_schedule(raw, parsed)
+        # Which day is this plan FOR? The client sends "today"/"tomorrow" (defaulting
+        # smartly by time of day) so an evening save lands on the right morning.
+        now = datetime.now()
+        when = (data.get("for") or "").strip().lower() if isinstance(data, dict) else ""
+        if when == "tomorrow":
+            for_date = (now + timedelta(days=1)).strftime("%Y-%m-%d")
+        elif when == "today":
+            for_date = now.strftime("%Y-%m-%d")
+        else:
+            # No explicit choice: after 6pm, assume the plan is for tomorrow.
+            for_date = ((now + timedelta(days=1)) if now.hour >= 18 else now).strftime("%Y-%m-%d")
+        digest_store.save_schedule(raw, parsed, for_date=for_date)
         self._send_json(200, {
             "ok": True,
             "parsed": parsed,
+            "for_date": for_date,
             "counts": digest_schedule.summary_counts(parsed),
             "text": digest_schedule.render_text(parsed),
         })
@@ -592,6 +649,57 @@ class Handler(BaseHTTPRequestHandler):
             "text": digest_korean.render_summary(lesson),
             "progress": digest_korean.progress_summary(digest_store.load_korean()),
         })
+
+    def _digest_korean_grade(self):
+        """Grade Korean practice sentences submitted from the dashboard."""
+        try:
+            data = self._read_json_body()
+        except json.JSONDecodeError:
+            self._send_json(400, {"ok": False, "error": "Invalid request body."})
+            return
+        raw = data.get("sentences") or ""
+        sents = [s.strip() for s in re.split(r"[\n]+", raw) if s.strip()]
+        if not sents:
+            self._send_json(400, {"ok": False, "error": "Enter one or more Korean sentences."})
+            return
+        cfg = digest_store.load_config()
+        today = datetime.now().strftime("%Y-%m-%d")
+        kstate = digest_store.load_korean()
+        theme_words = [w.get("korean", "") for w in
+                       (kstate.get("weekly") or {}).get("words", []) if w.get("korean")]
+        lesson = digest_store.korean_lesson_for(today) or {}
+        vocab_ctx = ", ".join(f"{v.get('korean','')} ({v.get('english','')})"
+                              for v in lesson.get("vocab", []))
+        try:
+            results = digest_korean.grade_practice(
+                sents, vocab_context=vocab_ctx, theme_words=theme_words,
+                model=(cfg.get("model") or None))
+        except DigestLLMError as exc:
+            self._send_json(502, {"ok": False, "error": f"LLM error: {exc}"})
+            return
+        if results:
+            digest_store.save_korean_practice(today, results)
+            done_words = [r["word"] for r in results if r.get("word")]
+            if done_words:
+                n = digest_korean.mark_theme_completion(kstate, done_words, today)
+                if n:
+                    digest_store.save_korean(kstate)
+        self._send_json(200, {
+            "ok": True, "results": results,
+            "practice": digest_korean.practice_stats(digest_store.load_korean()),
+        })
+
+    def _digest_report(self):
+        """Apply a pasted daily report: schedule-format text where lines starting
+        with '#' mark that task as completed today."""
+        try:
+            data = self._read_json_body()
+        except json.JSONDecodeError:
+            self._send_json(400, {"ok": False, "error": "Invalid request body."})
+            return
+        raw = data.get("raw") or ""
+        result = digest_dayplan.apply_report(raw)
+        self._send_json(200, {"ok": True, **result})
 
     def _digest_korean_placement(self):
         try:
@@ -1004,6 +1112,29 @@ class Handler(BaseHTTPRequestHandler):
             "pdf_base64": pdf_b64,
         })
 
+    def _ats_text(self):
+        """Return the extracted text layer of a compiled PDF -- exactly what an ATS
+        'sees' when it copies the text out (the objective diagnostic)."""
+        try:
+            data = self._read_json_body()
+        except json.JSONDecodeError:
+            self._send_json(400, {"ok": False, "error": "Invalid request body."})
+            return
+        b64 = data.get("pdf_base64") or ""
+        if not b64:
+            self._send_json(400, {"ok": False, "error": "No PDF provided."})
+            return
+        try:
+            pdf_bytes = base64.b64decode(b64)
+            text = core.extract_pdf_text(pdf_bytes)
+        except core.PipelineError as exc:
+            self._send_json(400, {"ok": False, "error": str(exc)})
+            return
+        except Exception as exc:  # noqa: BLE001
+            self._send_json(500, {"ok": False, "error": f"{type(exc).__name__}: {exc}"})
+            return
+        self._send_json(200, {"ok": True, "text": text})
+
     def _atsify(self):
         try:
             data = self._read_json_body()
@@ -1100,6 +1231,9 @@ class Handler(BaseHTTPRequestHandler):
         if not isinstance(bold_spec, str):
             bold_spec = json.dumps(bold_spec)
 
+        # Optional per-JD professional summary section.
+        summary = bool(data.get("summary"))
+
         # An optional PDF resume arrives base64-encoded.
         resume_pdf_bytes = None
         pdf_b64_in = data.get("resume_pdf_base64")
@@ -1114,59 +1248,111 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(400, {"ok": False, "error": "Please paste a job description."})
             return
 
+        # Run generation on a background thread and report accurate progress that the
+        # UI polls via /api/generate/status. Preserve the active user in the worker.
+        _prune_gen_jobs()
+        job_id = uuid.uuid4().hex[:12]
         try:
-            result = core.generate(
-                jd_text=jd_text,
-                source_text=source_text,
-                resume_pdf_bytes=resume_pdf_bytes,
-                notes=notes,
-                instructions=instructions,
-                fresh_pass=fresh_pass,
-                bold=bold,
-                bold_spec=bold_spec,
-                deterministic=deterministic,
-                model=model,
-                do_compile=True,
-            )
-        except CompileError as exc:
-            self._send_json(400, {"ok": False, "error": str(exc)})
-            return
-        except core.PipelineError as exc:
-            self._send_json(400, {"ok": False, "error": str(exc)})
-            return
-        except llm.LLMError as exc:
-            self._send_json(502, {"ok": False, "error": f"LLM error: {exc}"})
-            return
-        except Exception as exc:  # noqa: BLE001 - surface compile/other errors to the UI
-            traceback.print_exc()
-            self._send_json(500, {"ok": False, "error": f"{type(exc).__name__}: {exc}"})
-            return
+            uid = user_context.current_user_id()
+        except Exception:  # noqa: BLE001
+            uid = None
+        with _GEN_LOCK:
+            _GEN_JOBS[job_id] = {"percent": 0.0, "stage": "Starting\u2026",
+                                 "done": False, "result": None, "ts": time.time()}
+        _log(f"generate job {job_id} started (deterministic={deterministic}, "
+             f"model={model or 'default'}, user={uid})")
 
-        pdf_b64 = ""
-        if result.pdf_path and Path(result.pdf_path).exists():
-            pdf_b64 = base64.b64encode(Path(result.pdf_path).read_bytes()).decode("ascii")
+        def _progress(pct, stage):
+            with _GEN_LOCK:
+                j = _GEN_JOBS.get(job_id)
+                if j:
+                    j["percent"] = pct
+                    j["stage"] = stage
+                    j["ts"] = time.time()
 
-        self._send_json(200, {
-            "ok": True,
-            "pages": result.pages,
-            "used_llm": result.used_llm,
-            "deterministic": result.deterministic,
-            "profile_source": result.profile_source,
-            "profile_name": store.profile_name(),
-            "context_used": result.context_used,
-            "gaps": result.gaps,
-            "summary": result.summary,
-            "notes_saved": result.notes_saved,
-            "diff": result.diff,
-            "changed": result.changed,
-            "font_pt": result.font_pt,
-            "textheight_extra": result.textheight_extra,
-            "textwidth_extra": result.textwidth_extra,
-            "hit_floor": result.hit_floor,
-            "warnings": result.warnings,
-            "tex": result.tex,
-            "pdf_base64": pdf_b64,
-        })
+        def _finish(payload):
+            with _GEN_LOCK:
+                j = _GEN_JOBS.get(job_id)
+                if j:
+                    j.update(done=True, result=payload, ts=time.time())
+                    if payload.get("ok"):
+                        j["percent"] = 100.0
+                        j["stage"] = "Done"
+            if payload.get("ok"):
+                _log(f"generate job {job_id} done ({payload.get('pages')} page).")
+            else:
+                _log(f"generate job {job_id} FAILED: {payload.get('error')}")
+
+        def _worker():
+            def run():
+                return core.generate(
+                    jd_text=jd_text, source_text=source_text,
+                    resume_pdf_bytes=resume_pdf_bytes, notes=notes,
+                    instructions=instructions, fresh_pass=fresh_pass, bold=bold,
+                    bold_spec=bold_spec, summary=summary, deterministic=deterministic,
+                    model=model, do_compile=True, progress=_progress)
+            try:
+                if uid:
+                    with user_context.using_user(uid):
+                        result = run()
+                else:
+                    result = run()
+            except CompileError as exc:
+                _finish({"ok": False, "error": str(exc)}); return
+            except core.PipelineError as exc:
+                _finish({"ok": False, "error": str(exc)}); return
+            except llm.LLMError as exc:
+                _finish({"ok": False, "error": f"LLM error: {exc}"}); return
+            except Exception as exc:  # noqa: BLE001
+                traceback.print_exc()
+                _finish({"ok": False, "error": f"{type(exc).__name__}: {exc}"}); return
+            pdf_b64 = ""
+            try:
+                if result.pdf_path and Path(result.pdf_path).exists():
+                    pdf_b64 = base64.b64encode(Path(result.pdf_path).read_bytes()).decode("ascii")
+                name = store.profile_name()
+                if uid:
+                    with user_context.using_user(uid):
+                        name = store.profile_name()
+            except Exception:  # noqa: BLE001
+                name = ""
+            _finish({
+                "ok": True, "pages": result.pages, "used_llm": result.used_llm,
+                "deterministic": result.deterministic, "profile_source": result.profile_source,
+                "profile_name": name, "context_used": result.context_used,
+                "gaps": result.gaps, "summary": result.summary,
+                "notes_saved": result.notes_saved, "diff": result.diff,
+                "changed": result.changed, "font_pt": result.font_pt,
+                "textheight_extra": result.textheight_extra,
+                "textwidth_extra": result.textwidth_extra, "hit_floor": result.hit_floor,
+                "warnings": result.warnings, "tex": result.tex, "pdf_base64": pdf_b64,
+            })
+
+        threading.Thread(target=_worker, daemon=True, name=f"gen-{job_id}").start()
+        self._send_json(200, {"ok": True, "job_id": job_id})
+
+    def _generate_status(self):
+        qs = urllib.parse.urlparse(self.path).query
+        job_id = (urllib.parse.parse_qs(qs).get("id") or [""])[0]
+        with _GEN_LOCK:
+            job = _GEN_JOBS.get(job_id)
+            if not job:
+                self._send_json(404, {"ok": False, "error": "Unknown or expired job."})
+                return
+            percent = job["percent"]
+            stage = job["stage"]
+            done = job["done"]
+            result = job["result"] if done else None
+            if done:
+                _GEN_JOBS.pop(job_id, None)  # one-shot: hand off the result and drop it
+        if done:
+            payload = dict(result or {"ok": False, "error": "No result."})
+            payload["done"] = True
+            payload["percent"] = 100.0 if payload.get("ok") else percent
+            self._send_json(200, payload)
+        else:
+            self._send_json(200, {"ok": True, "done": False,
+                                  "percent": round(percent, 1), "stage": stage})
 
     def log_message(self, fmt, *args):  # quieter logging
         return
@@ -1198,8 +1384,14 @@ def main(argv=None) -> int:
         print(f"Could not bind any port in {want}-{want + 9}.")
         return 1
     if port != want:
-        print(f"Port {want} was busy; using {port} instead.")
+        print("=" * 66)
+        print(f"  WARNING: port {want} is already in use (an OLD server is likely")
+        print(f"  still running there). This instance started on {port} instead.")
+        print(f"  Your browser at :{want} is talking to the OLD code. Stop the old")
+        print(f"  server, or open the NEW url below, so your changes take effect.")
+        print("=" * 66)
     url = f"http://{args.host}:{port}"
+    _log(f"server {SERVER_VERSION} starting on {url} (requested :{want})")
 
     # Start the (isolated) daily-digest scheduler.
     from digest_pipeline import scheduler as digest_scheduler

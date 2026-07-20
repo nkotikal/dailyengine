@@ -39,6 +39,7 @@ class Density:
     keep_older: int = 999             # bullets for older experience entries
     keep_project: int = 999           # bullets per project
     keep_skill_categories: int = 999  # max skill categories rendered
+    keep_summary: bool = True         # include the optional summary (dropped first to fit)
     # Spacing values copied from the baseline macros (pt). More-negative = tighter.
     item_vspace: int = -2
     sub_lead_vspace: int = -2
@@ -147,6 +148,17 @@ def _item_list(bullets) -> str:
         lines.append("        \\resumeItem{%s}" % escape_with_bold(bullet_text(b)))
     lines.append("      \\resumeItemListEnd")
     return "\n".join(lines)
+
+
+def render_summary_section(summary: str) -> str:
+    """Optional professional summary: a standard 'Summary' section (ATS-recognized)
+    with a short left-aligned paragraph. Supports **bold** spans."""
+    text = escape_with_bold(str(summary or "").strip())
+    if not text:
+        return ""
+    return ("\n%--- SUMMARY ---\n"
+            "\\section{Summary}\n"
+            "  \\small{" + text + "}\n\\vspace{-4pt}\n")
 
 
 def render_education(education) -> str:
@@ -306,7 +318,7 @@ _DOC = r"""%-------------------------
 
 %--- HEADING ---
 @@HEADING@@
-
+@@SUMMARY_SECTION@@
 %--- EDUCATION ---
 \section{Education}
   \resumeSubHeadingListStart
@@ -336,6 +348,10 @@ def build_document(profile: dict, weights: dict, density: Density) -> str:
 
     ordered_skills = tailor.order_skills(skills, weights)
 
+    summary_section = ""
+    if density.keep_summary:
+        summary_section = render_summary_section(profile.get("profile_summary", ""))
+
     projects_section = ""
     if projects:
         projects_section = (
@@ -358,6 +374,7 @@ def build_document(profile: dict, weights: dict, density: Density) -> str:
         "@@TITLETOP@@": str(density.title_top_vspace),
         "@@TITLERULE@@": str(density.title_rule_vspace),
         "@@HEADING@@": render_heading(contact),
+        "@@SUMMARY_SECTION@@": summary_section,
         "@@EDUCATION@@": render_education(education),
         "@@EXPERIENCE@@": render_experience(experience, density, weights),
         "@@PROJECTS_SECTION@@": projects_section,

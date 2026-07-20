@@ -1,0 +1,113 @@
+{
+  "contact": {
+    "name": "Jordan A. Rivera",
+    "email": "jordan.rivera@example.com",
+    "phone": "+1 555-0142",
+    "linkedin": "linkedin.com/in/jordan-rivera",
+    "github": "github.com/jordanrivera"
+  },
+  "education": [
+    {
+      "institution": "State University",
+      "location": "Austin, TX",
+      "degree": "B.S. in Computer Science",
+      "gpa": "3.8/4.0",
+      "dates": "Aug 2018 -- May 2022"
+    }
+  ],
+  "skills": {
+    "Backend & Languages": [
+      "Python",
+      "FastAPI",
+      "Go",
+      "SQL",
+      "Django"
+    ],
+    "Cloud & DevOps": [
+      "AWS",
+      "Kubernetes",
+      "Docker",
+      "Terraform",
+      "Infrastructure as Code",
+      "CI/CD"
+    ],
+    "Data": [
+      "PostgreSQL",
+      "Redis",
+      "Kafka",
+      "Snowflake"
+    ]
+  },
+  "experience": [
+    {
+      "company": "Cloudwave Systems",
+      "location": "Remote",
+      "role": "Senior Software Engineer",
+      "dates": "Jun 2022 -- Present",
+      "bullets": [
+        "Architected a Python and FastAPI microservice on AWS handling 12M requests/day, cutting p95 latency by 38%.",
+        "Led a monolith migration to Kubernetes with Terraform-managed infrastructure as code, reducing deployment time from 45 minutes to 6 minutes.",
+        "Built a Kafka event pipeline feeding Snowflake, enabling real-time analytics for 200+ internal users.",
+        "Optimized PostgreSQL queries and Redis caching, saving an estimated $90k/year in compute costs.",
+        "Mentored 4 engineers and introduced CI/CD (continuous integration and continuous delivery) quality gates, reducing production incidents by 25%."
+      ]
+    },
+    {
+      "company": "Brightline Apps",
+      "location": "Austin, TX",
+      "role": "Software Engineer",
+      "dates": "Jul 2020 -- May 2022",
+      "bullets": [
+        "Implemented a Django REST API and integrated Stripe billing while maintaining 99.9% uptime.",
+        "Expanded automated test coverage from 40% to 85% across the core service."
+      ]
+    }
+  ],
+  "projects": [
+    {
+      "title": "OpenMetrics Dashboard",
+      "tech": [
+        "Go",
+        "Docker",
+        "Prometheus",
+        "React"
+      ],
+      "dates": "2023",
+      "bullets": [
+        "Built an open-source observability dashboard adopted by the community with 1.2k GitHub stars.",
+        "Implemented a Go collector exporting 60+ Prometheus metrics with less than 2% overhead."
+      ]
+    },
+    {
+      "title": "ResumeForge",
+      "tech": [
+        "Python",
+        "FastAPI",
+        "LaTeX"
+      ],
+      "dates": "2022",
+      "bullets": [
+        "Built a deterministic Python and FastAPI JSON-to-LaTeX resume generator with ATS-aware formatting.",
+        "Automated one-page document fitting through a compiler loop using pdflatex."
+      ]
+    }
+  ],
+  "keywords": [
+    "Python",
+    "FastAPI",
+    "microservices",
+    "AWS",
+    "Kubernetes",
+    "Docker",
+    "Terraform",
+    "infrastructure as code",
+    "Kafka",
+    "Snowflake",
+    "PostgreSQL",
+    "Redis",
+    "CI/CD",
+    "Go"
+  ],
+  "gaps": [],
+  "summary": "Prioritized direct evidence of Python, FastAPI, AWS microservices, Kubernetes, Terraform, Kafka, Snowflake, PostgreSQL, and Redis experience. Reordered and trimmed skills and older-role content for a faster backend-focused scan while preserving all employers, titles, dates, and metrics. Kept Go and Docker visible through the OpenMetrics project and applied no bolding as requested."
+}

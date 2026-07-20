@@ -69,6 +69,20 @@ def _print_summary(summary):
         print(f"  {line.strip()}")
 
 
+def _print_ats(ats):
+    """Print the deterministic ATS keyword-coverage report."""
+    if not ats or not ats.get("targeted"):
+        return
+    print(f"\n[ats] keyword coverage {ats['pct_before']}% -> {ats['pct_after']}% "
+          f"({ats['covered_exact']} exact + {ats['covered_alias']} via synonym "
+          f"of {ats['targeted']} targeted)")
+    for inj in ats.get("injected", []):
+        print(f"  + injected exact phrase '{inj['keyword']}' into {inj['category']} "
+              "(synonym already present)")
+    if ats.get("missing"):
+        print(f"  still uncovered (no truthful support): {', '.join(ats['missing'])}")
+
+
 def main(argv=None) -> int:
     core.load_dotenv()
     p = argparse.ArgumentParser(description="Generate a tailored one-page LaTeX resume.")
@@ -180,6 +194,7 @@ def main(argv=None) -> int:
     if result.profile_source == "optimized":
         print("[draft] continuing from your last optimized resume")
     _print_summary(result.summary)
+    _print_ats(result.ats)
     _print_gaps(result.gaps)
 
     if not args.do_compile:

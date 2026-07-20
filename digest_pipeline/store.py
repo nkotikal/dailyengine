@@ -66,6 +66,11 @@ DEFAULT_CONFIG = {
     # --- daily accountability (email check-ins + score) ---
     "checkins_enabled": False,       # send progress check-in emails through the day
     "checkin_times": ["11:30", "15:00", "18:30"],  # local HH:MM slots to check in
+    # Content controls for the check-in emails (what each one includes):
+    "checkin_show_score": True,      # the points / tasks-done / % strip
+    "checkin_show_later": True,      # the "Later today" section (else only what's due by now)
+    "checkin_show_hint": True,       # the "reply done 1 3" instructions box
+    "checkin_scope": "up_to_now",    # "up_to_now" = focus on due-by-now; "full_day" = whole plan
     "eod_recap_enabled": False,      # send an end-of-day recap + score email
     "eod_recap_time": "21:00",       # when the recap goes out
     "interests": [],             # topics you care about (shape headline selection)
@@ -359,13 +364,32 @@ def load_schedule() -> dict:
 def save_schedule(raw: str, parsed: dict, for_date: str | None = None) -> dict:
     """Persist the planner. ``for_date`` (YYYY-MM-DD) is the day this plan is FOR
     (defaults to today), so the morning digest can tell whether the stored schedule
-    is actually for today or a stale carry-over from a previous day."""
+    is actually for today or a stale carry-over from a previous day.
+
+    Also appends to a rolling schedule HISTORY so the generator can learn recurring
+    items and their usual timings from past days.
+    """
     with _LOCK:
+        fd = for_date or time.strftime("%Y-%m-%d")
         data = {"raw": raw or "", "parsed": parsed or {},
-                "for_date": (for_date or time.strftime("%Y-%m-%d")),
+                "for_date": fd,
                 "updated_at": time.strftime("%Y-%m-%d %H:%M:%S")}
         _write_json(_p("schedule.json"), data)
+        hist = _read_json(_p("schedule_history.json"), [])
+        if not isinstance(hist, list):
+            hist = []
+        hist = [h for h in hist if h.get("for_date") != fd]  # one entry per date
+        hist.append({"for_date": fd, "raw": raw or "", "saved_at": data["updated_at"]})
+        hist.sort(key=lambda h: h.get("for_date", ""))
+        _write_json(_p("schedule_history.json"), hist[-60:])
         return data
+
+
+def list_schedule_history(limit: int = 21) -> list:
+    """Recent past schedules (oldest first), for learning recurring patterns."""
+    with _LOCK:
+        hist = _read_json(_p("schedule_history.json"), [])
+        return (hist if isinstance(hist, list) else [])[-limit:]
 
 
 # --- end-of-day reflection (blockers / mood / progress; feeds next morning) --

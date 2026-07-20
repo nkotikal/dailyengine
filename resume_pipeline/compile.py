@@ -69,30 +69,35 @@ def density_ladder(profile: dict):
     """
     n_exp = len(profile.get("experience", []) or [])
     n_proj = len(profile.get("projects", []) or [])
+    # From step 1 on, the optional summary is dropped FIRST (before trimming any real
+    # bullets), so an opt-in summary never pushes actual experience off the page.
     ladder = [
-        # 0: baseline template, untouched.
+        # 0: baseline template, untouched (summary kept if present).
         Density(),
-        # 1: a little extra vertical room.
-        Density(textheight_extra=1.3),
+        # 1: a little extra vertical room; drop the optional summary.
+        Density(textheight_extra=1.3, keep_summary=False),
         # 2: more vertical room + slightly tighter list spacing.
-        Density(textheight_extra=1.4, listend_vspace=-6, sub_trail_vspace=-8),
+        Density(textheight_extra=1.4, keep_summary=False,
+                listend_vspace=-6, sub_trail_vspace=-8),
         # 3: trim weakest bullets on older roles / projects.
-        Density(textheight_extra=1.4, keep_older=3, keep_project=3,
+        Density(textheight_extra=1.4, keep_summary=False, keep_older=3, keep_project=3,
                 listend_vspace=-6, sub_trail_vspace=-8),
         # 4: wider lines (fewer wraps) + tighter spacing.
-        Density(textheight_extra=1.5, textwidth_extra=1.2, keep_older=3, keep_project=3,
+        Density(textheight_extra=1.5, textwidth_extra=1.2, keep_summary=False,
+                keep_older=3, keep_project=3,
                 listend_vspace=-6, sub_trail_vspace=-8, item_vspace=-3),
         # 5: trim recent role too.
-        Density(textheight_extra=1.5, textwidth_extra=1.2, keep_recent=4, keep_older=2,
+        Density(textheight_extra=1.5, textwidth_extra=1.2, keep_summary=False,
+                keep_recent=4, keep_older=2,
                 keep_project=2, listend_vspace=-6, sub_trail_vspace=-8, item_vspace=-3),
         # 6: drop to 10pt (last typographic resort, still ATS-readable).
-        Density(font_pt=10, textheight_extra=1.5, textwidth_extra=1.2, keep_recent=4,
-                keep_older=2, keep_project=2, listend_vspace=-6, sub_trail_vspace=-8,
-                item_vspace=-3),
+        Density(font_pt=10, textheight_extra=1.5, textwidth_extra=1.2, keep_summary=False,
+                keep_recent=4, keep_older=2, keep_project=2, listend_vspace=-6,
+                sub_trail_vspace=-8, item_vspace=-3),
         # 7: 10pt + hard floors.
-        Density(font_pt=10, textheight_extra=1.5, textwidth_extra=1.2, keep_recent=3,
-                keep_older=2, keep_project=1, listend_vspace=-6, sub_trail_vspace=-8,
-                item_vspace=-3),
+        Density(font_pt=10, textheight_extra=1.5, textwidth_extra=1.2, keep_summary=False,
+                keep_recent=3, keep_older=2, keep_project=1, listend_vspace=-6,
+                sub_trail_vspace=-8, item_vspace=-3),
     ]
     # If there is little content, the later aggressive steps are irrelevant but
     # harmless; keep the full ladder for determinism regardless of n_exp/n_proj.
@@ -100,20 +105,30 @@ def density_ladder(profile: dict):
     return ladder
 
 
-def fit_one_page(profile: dict, weights: dict, workdir: Path):
+def fit_one_page(profile: dict, weights: dict, workdir: Path, on_attempt=None):
     """Compile escalating configs until the PDF is exactly one page.
 
     Returns (tex_str, pdf_path, density, pages, hit_floor). ``hit_floor`` is True
     when the ladder was exhausted without reaching one page (smallest ATS-safe
     config is returned).
+
+    ``on_attempt(done, total)`` (optional) is called before each compile and once
+    at the end, giving an accurate progress signal for the fit loop.
     """
     ladder = density_ladder(profile)
+    total = len(ladder)
     last = None
-    for density in ladder:
+    for i, density in enumerate(ladder):
+        if on_attempt:
+            on_attempt(i, total)
         tex = build_document(profile, weights, density)
         pdf = compile_tex(tex, workdir)
         pages = page_count(pdf)
         last = (tex, pdf, density, pages)
         if pages == 1:
+            if on_attempt:
+                on_attempt(total, total)
             return (*last, False)
+    if on_attempt:
+        on_attempt(total, total)
     return (*last, True)

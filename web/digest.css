@@ -165,6 +165,15 @@
 .d-done { opacity: 0.5; }
 .d-done .d-tracker-meta { text-decoration: line-through; }
 
+/* ---- daily report confirmation ---- */
+.d-report-conf {
+  margin-top: 10px; padding: 12px 14px; border-radius: var(--radius-sm);
+  border: 1px solid var(--glass-brd); font-size: 13.5px; line-height: 1.5;
+}
+.d-report-conf.ok { background: rgba(95,230,180,0.10); border-color: rgba(95,230,180,0.35); color: var(--text); }
+.d-report-conf.warn { background: rgba(255,212,121,0.10); border-color: rgba(255,212,121,0.35); color: var(--text-soft); }
+.d-report-conf code { background: rgba(255,255,255,0.12); padding: 1px 5px; border-radius: 5px; }
+
 /* ---- korean ---- */
 .d-korean-out { margin-top: 14px; display: flex; flex-direction: column; gap: 18px; }
 .d-k-section { display: flex; flex-direction: column; gap: 8px; }

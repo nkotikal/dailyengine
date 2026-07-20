@@ -82,6 +82,13 @@ Rules for bullets:
   interviews and can get a candidate rejected or fired.
 - You MAY rephrase boldly, surface skills genuinely implied by described work,
   reorder, and shift emphasis. Keep every factual anchor intact.
+- **Preserve the exact completion status and tense of in-progress work.**
+  Distinguish done vs. ongoing vs. goal: "merged" vs. "authored, pending review"
+  vs. "autotuned tile configs (done) and now improving it to outperform CK
+  (ongoing)." Never imply a goal or half-finished task is complete.
+- **Never drop an acronym's definition.** Spell it out on first use as "Full Name
+  (ACRONYM)" and do not remove an existing expansion during a rewrite (e.g., keep
+  "Meta Superintelligence Labs Kernels (MSLK)").
 
 ## 5. ATS mechanics (hard constraints)
 
@@ -157,13 +164,16 @@ Match the language to the level the job description targets, truthfully.
 
 ## 11. Working within this template (constraints)
 
-This pipeline renders the Jake Gutierrez single-column template, which is already
-ATS-safe (single column, standard headings, body-text contact line, selectable
-text via `\pdfgentounicode=1`). The optimizer controls **content only** and must
-return the same JSON schema: `contact`, `education`, `skills`, `experience`
-(with `bullets`), `projects` (with `tech`, `bullets`). It must not invent new
-sections (the template has no summary/objective block) and must keep the contact
-block factual and unchanged.
+This pipeline renders a single-column, ATS-hardened template: standard headings,
+**left-aligned subheadings (no multi-column tables)**, a body-text contact line
+with plain `|` separators, selectable text via `\pdfgentounicode=1`, and Unicode
+normalized to ASCII (arrows, dashes, smart quotes, etc.). The optimizer controls
+**content only** and returns the JSON schema: `contact`, `education`, `skills`,
+`experience` (with `bullets`), `projects` (with `tech`, `bullets`). Optional fields
+it may add ONLY when the corresponding directive is on: `profile_summary` (a short
+Summary section), per-bullet `pinned` flags (must-keep bullets), and `**bold**`
+spans inside bullet text. Keep the contact block factual and unchanged; do not
+invent other sections.
 
 ---
 
@@ -177,4 +187,6 @@ block factual and unchanged.
 - [ ] Skill categories and bullets reordered most-relevant-first for this JD.
 - [ ] Scope language matches the target level.
 - [ ] No fabricated facts, numbers, titles, dates, or credentials.
+- [ ] In-progress work states its true status/tense (done vs. ongoing vs. goal).
+- [ ] Acronyms keep their "Full Name (ACRONYM)" first-use definition.
 - [ ] Fits one page; standard headings; contact in body; single column.

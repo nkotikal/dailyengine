@@ -86,6 +86,9 @@ async function loadStatus() {
       chip("API key", s.has_key ? "configured" : "missing", s.has_key ? "good" : "bad"),
       chip("LaTeX", s.pdflatex ? "ready" : "missing", s.pdflatex ? "good" : "bad"),
     ];
+    if (!s.async_generate) {
+      chips.push(chip("Server", "old \u2014 restart", "bad"));
+    }
     $("status-chips").innerHTML = chips.join("");
 
     const pill = $("profile-pill");
@@ -155,6 +158,46 @@ function setBusy(busy, fromGaps) {
   btn.querySelector(".spinner").hidden = !busy;
 }
 
+function showProgress(on) {
+  const el = $("gen-progress");
+  if (!el) return;
+  el.hidden = !on;
+  if (on) setProgress(0, "Starting\u2026");
+}
+
+function setProgress(pct, stage) {
+  const fill = $("gen-progress-fill");
+  const pctEl = $("gen-progress-pct");
+  const stEl = $("gen-progress-stage");
+  const p = Math.max(0, Math.min(100, Math.round(pct)));
+  if (fill) fill.style.width = p + "%";
+  if (pctEl) pctEl.textContent = p + "%";
+  if (stEl && stage) stEl.textContent = stage;
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Poll the async generation job, updating the progress bar. Resolves with the
+// final result payload (which has .ok true/false).
+async function pollGenerate(jobId) {
+  let misses = 0;
+  while (true) {
+    await sleep(400);
+    let s;
+    try {
+      const r = await fetch("/api/generate/status?id=" + encodeURIComponent(jobId));
+      if (r.status === 404) throw new Error("The generation job expired. Please try again.");
+      s = await r.json();
+    } catch (e) {
+      if (++misses > 3) throw e;   // tolerate a transient blip or two
+      continue;
+    }
+    misses = 0;
+    if (s.done) { setProgress(100, "Done"); return s; }
+    setProgress(s.percent || 0, s.stage || "Working\u2026");
+  }
+}
+
 function showError(msg) {
   const el = $("error");
   el.textContent = msg;
@@ -222,18 +265,38 @@ async function generate(opts) {
   const boldSpec = ($("bold-spec").value || "").trim();
   if ($("bold-toggle").checked || boldSpec) payload.bold = true;
   if (boldSpec) payload.bold_spec = boldSpec;
+  if ($("summary-toggle").checked) payload.summary = true;
 
   setBusy(true, opts.fromGaps);
+  showProgress(true);
   try {
-    const r = await fetch("/api/generate", {
+    const start = await fetch("/api/generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    const data = await r.json();
+    const sj = await start.json();
+    let data;
+    if (sj && sj.ok && sj.job_id) {
+      data = await pollGenerate(sj.job_id);          // new async server
+    } else if (sj && sj.ok && (sj.tex || sj.pdf_base64)) {
+      // Old server returned the full result synchronously (no live progress).
+      data = sj;
+      setProgress(100, "Done");
+      showError("Heads up: your server is an older version, so there's no live "
+        + "progress bar. A previous instance is likely still running on this port \u2014 "
+        + "stop it and restart, then reload. Your resume still generated below.");
+    } else {
+      console.warn("Unexpected /api/generate response:", sj);
+      showError((sj && sj.error)
+        || "Could not start generation. The server may be an old instance still "
+           + "bound to this port \u2014 fully stop it, restart, and reload this page.");
+      return;
+    }
     if (!data.ok) { showError(data.error || "Generation failed."); return; }
 
     updatePdfPreview(data.pdf_base64, data.tex);
+    setDownloadNames(data.profile_name);
     $("tex-editor").value = data.tex;
     $("tex-editor-wrap").hidden = true;
     $("toggle-tex").textContent = "Edit LaTeX";
@@ -288,6 +351,7 @@ async function generate(opts) {
     showError("Network error: " + e.message);
   } finally {
     setBusy(false, opts.fromGaps);
+    showProgress(false);
   }
 }
 
@@ -362,9 +426,13 @@ async function regenerateWithGaps() {
   await generate({ notes, fromGaps: true });
 }
 
+let lastPdfB64 = null;      // current PDF (for the ATS text extraction)
+let lastProfileName = "";   // for ATS-friendly download filenames
+
 function updatePdfPreview(pdfBase64, tex) {
   if (lastPdfUrl) URL.revokeObjectURL(lastPdfUrl);
   if (lastTexUrl) URL.revokeObjectURL(lastTexUrl);
+  lastPdfB64 = pdfBase64;
   const pdfBlob = b64ToBlob(pdfBase64, "application/pdf");
   lastPdfUrl = URL.createObjectURL(pdfBlob);
   const texBlob = new Blob([tex], { type: "text/plain" });
@@ -372,6 +440,40 @@ function updatePdfPreview(pdfBase64, tex) {
   $("pdf-frame").src = lastPdfUrl;
   $("download-pdf").href = lastPdfUrl;
   $("download-tex").href = lastTexUrl;
+  // reset any open ATS-text panel (stale for the new PDF)
+  const atsWrap = $("ats-text-wrap");
+  if (atsWrap && !atsWrap.hidden) { atsWrap.hidden = true; $("ats-text-btn").textContent = "View ATS text"; }
+}
+
+// ATS auto-parse can populate the name field from the filename, so name it clearly.
+function setDownloadNames(name) {
+  if (name) lastProfileName = name;
+  const raw = lastProfileName ? lastProfileName + "_Resume" : "resume";
+  const base = raw.trim().replace(/[^A-Za-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "resume";
+  $("download-pdf").download = base + ".pdf";
+  $("download-tex").download = base + ".tex";
+}
+
+async function viewAtsText() {
+  const btn = $("ats-text-btn");
+  const wrap = $("ats-text-wrap");
+  if (!wrap.hidden) { wrap.hidden = true; btn.textContent = "View ATS text"; return; }
+  if (!lastPdfB64) { showError("Generate a resume first."); return; }
+  btn.textContent = "Loading...";
+  try {
+    const r = await fetch("/api/ats-text", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pdf_base64: lastPdfB64 }),
+    });
+    const data = await r.json();
+    if (!data.ok) { showError(data.error || "Could not extract text."); btn.textContent = "View ATS text"; return; }
+    $("ats-text-view").textContent = data.text;
+    wrap.hidden = false;
+    btn.textContent = "Hide ATS text";
+  } catch (e) {
+    showError("Network error: " + e.message);
+    btn.textContent = "View ATS text";
+  }
 }
 
 async function recompileTex() {
@@ -397,6 +499,7 @@ async function recompileTex() {
       return;
     }
     updatePdfPreview(data.pdf_base64, data.tex);
+    setDownloadNames();
     $("tex-editor").value = data.tex;
     const meta = $("result-meta");
     meta.hidden = false;
@@ -555,6 +658,7 @@ async function runAtsify() {
     const data = await r.json();
     if (!data.ok) { err.textContent = data.error || "ATS conversion failed."; err.hidden = false; return; }
     updatePdfPreview(data.pdf_base64, data.tex);
+    setDownloadNames(data.profile_name);
     $("tex-editor").value = data.tex;
     $("tex-editor-wrap").hidden = true;
     $("toggle-tex").textContent = "Edit LaTeX";
@@ -982,6 +1086,7 @@ function init() {
     $("toggle-tex").textContent = wrap.hidden ? "Edit LaTeX" : "Hide LaTeX";
   });
   $("recompile-tex").addEventListener("click", recompileTex);
+  $("ats-text-btn").addEventListener("click", viewAtsText);
   $("ats-run").addEventListener("click", runAtsify);
   $("ats-file").addEventListener("change", onAtsFile);
   $("toggle-diff").addEventListener("click", () => {

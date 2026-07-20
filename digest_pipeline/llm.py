@@ -262,6 +262,57 @@ def post_json(
     return _parse_json(_extract_text(payload))
 
 
+def post_text(
+    system: str,
+    user: str,
+    *,
+    model: str | None = None,
+    temperature: float = 0.3,
+    max_tokens: int = 2048,
+    timeout: int = 120,
+    provider: str | None = None,
+) -> str:
+    """Like ``post_json`` but returns the model's raw TEXT (no JSON parsing).
+
+    Used for free-form outputs such as a generated planner-format schedule."""
+    prov = provider or _ACTIVE.get("provider", "anthropic")
+    if prov == "openai":
+        import openai_compat
+        om = _ACTIVE.get("model") or "gpt-5.4-mini"
+        try:
+            if hasattr(openai_compat, "post_text"):
+                return openai_compat.post_text(system, user, model=om,
+                                               temperature=temperature,
+                                               max_tokens=max_tokens, timeout=timeout)
+        except openai_compat.OpenAIError as exc:  # noqa
+            raise DigestLLMError(str(exc)) from exc
+        raise DigestLLMError("Text generation not available on the OpenAI provider.")
+    key = os.environ.get(API_KEY_ENV)
+    if not key:
+        raise DigestLLMError(f"{API_KEY_ENV} is not set. Configure it in .env, or use Offline mode.")
+    base = (os.environ.get(BASE_URL_ENV) or DEFAULT_BASE_URL).rstrip("/")
+    style = (os.environ.get(AUTH_STYLE_ENV) or "x-api-key").lower()
+    body = {
+        "model": resolve_model(model),
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "system": system,
+        "messages": [{"role": "user", "content": user}],
+    }
+    req = urllib.request.Request(
+        base + "/v1/messages", data=json.dumps(body).encode("utf-8"),
+        method="POST", headers=_headers(key, style))
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise DigestLLMError(f"LLM HTTP {exc.code}: {detail}") from exc
+    except urllib.error.URLError as exc:
+        raise DigestLLMError(f"Network error calling LLM: {exc.reason}") from exc
+    return _extract_text(payload)
+
+
 def compose_digest(
     *,
     about: str,

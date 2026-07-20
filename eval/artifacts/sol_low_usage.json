@@ -1,0 +1,29 @@
+{
+  "effort": "low",
+  "latency_s": 15.3,
+  "isl": 5238,
+  "osl": 1012,
+  "cached": 0,
+  "cache_write": 5235,
+  "reasoning_tokens": 129,
+  "cost_usd": 0.06309,
+  "ats_covered": 15,
+  "ats_total": 15,
+  "ats_missing": [],
+  "raw_usage": {
+    "prompt_tokens": 5238,
+    "completion_tokens": 1012,
+    "total_tokens": 6250,
+    "prompt_tokens_details": {
+      "cached_tokens": 0,
+      "cache_write_tokens": 5235,
+      "audio_tokens": 0
+    },
+    "completion_tokens_details": {
+      "reasoning_tokens": 129,
+      "audio_tokens": 0,
+      "accepted_prediction_tokens": 0,
+      "rejected_prediction_tokens": 0
+    }
+  }
+}

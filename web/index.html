@@ -156,6 +156,18 @@
         <p class="hint">Make key things stand out with bold (ATS-safe - bold is just weight). Flip on <strong>Auto-bold</strong> to let the AI pick the highest-impact spans (metrics + top tech), or say exactly what to bold below. It refines and persists on each regenerate.</p>
         <input type="text" id="bold-spec" class="field" placeholder="What to bold (optional), e.g. metrics &amp; numbers, key technologies, product/company names, scope" />
 
+        <div class="section-head spaced">
+          <h2>Professional summary</h2>
+          <label class="switch-wrap" title="Add a short, JD-tailored summary at the top. Dropped first if space is tight.">
+            <span>Include summary</span>
+            <span class="switch">
+              <input type="checkbox" id="summary-toggle" />
+              <span class="track"><span class="thumb"></span></span>
+            </span>
+          </label>
+        </div>
+        <p class="hint">Optional 1-2 line summary at the top, tailored to the job. Best for stretch/pivot roles; usually skippable when your experience already fits. It's dropped first if the page gets tight, so it never pushes real content off.</p>
+
         <div class="options">
           <label class="select-wrap">
             <span>Model</span>
@@ -193,6 +205,14 @@
           <span class="spinner" hidden></span>
         </button>
 
+        <div class="gen-progress" id="gen-progress" hidden>
+          <div class="gen-progress-head">
+            <span class="gen-progress-stage" id="gen-progress-stage">Starting&hellip;</span>
+            <span class="gen-progress-pct" id="gen-progress-pct">0%</span>
+          </div>
+          <div class="gen-progress-track"><span class="gen-progress-fill" id="gen-progress-fill"></span></div>
+        </div>
+
         <div class="error" id="error" hidden></div>
       </section>
 
@@ -219,6 +239,11 @@
             <a class="btn-glass subtle" id="download-tex" download="resume.tex">Download .tex</a>
             <button class="btn-glass subtle" id="toggle-tex" type="button">Edit LaTeX</button>
             <button class="btn-glass subtle" id="toggle-diff" type="button" hidden>View changes <span id="diff-badge" class="diff-badge" hidden></span></button>
+            <button class="btn-glass subtle" id="ats-text-btn" type="button">View ATS text</button>
+          </div>
+          <div class="ats-text-wrap" id="ats-text-wrap" hidden>
+            <p class="hint">This is the raw text layer an ATS extracts from your PDF (your "select-all &rarr; copy" view). Check that employer, title, dates, and keywords all read cleanly and in order.</p>
+            <pre class="tex-view mono" id="ats-text-view"></pre>
           </div>
           <div class="diff-wrap" id="diff-wrap" hidden>
             <p class="hint">Git-style diff of your resume content vs. the previous version. <span class="diff-add-key">green</span> = added, <span class="diff-del-key">red</span> = removed.</p>
@@ -498,6 +523,13 @@
         <p class="hint">Paste your planner. Numbers are hours (11 = 11 AM), tabbed lines are tasks/subtasks, and a leading <code>'</code> marks something important. It's parsed into your day and can be pushed to Google Calendar.</p>
         <textarea id="d-schedule" class="field mono" spellcheck="false" placeholder="11&#10;&#9;'AMD PR&#10;&#9;&#9;Inspect outputs&#10;12&#10;&#9;Lunch&#10;1&#10;&#9;Continue AMD PR"></textarea>
         <div class="d-actions">
+          <label class="select-wrap" title="Which morning this plan is for. Evening saves default to Tomorrow.">
+            <span>This plan is for</span>
+            <select id="d-schedule-for" class="field select">
+              <option value="today">Today</option>
+              <option value="tomorrow">Tomorrow</option>
+            </select>
+          </label>
           <button class="generate" id="d-parse" type="button">
             <span class="btn-label">Parse &amp; save</span><span class="spinner" hidden></span>
           </button>
@@ -505,6 +537,22 @@
         </div>
         <div class="d-schedule-note" id="d-cal-note"></div>
         <div class="d-parsed" id="d-parsed" hidden></div>
+      </section>
+
+      <!-- DAILY REPORT (what got done today) -->
+      <section class="glass panel" data-group="digest">
+        <div class="section-head">
+          <h2>Daily report</h2>
+          <span class="pill ghost" id="d-report-pill">log what's done</span>
+        </div>
+        <p class="hint">Paste your day in the <strong>same layout as your schedule</strong>, but start any line with <code>#</code> to mark that task <strong>completed</strong> today. It updates today's plan and score - so your check-ins and recap reflect real progress.</p>
+        <textarea id="d-report" class="field mono" spellcheck="false" placeholder="11&#10;&#9;#AMD PR&#10;12&#10;&#9;#Lunch&#10;2&#10;&#9;Harwath PRs"></textarea>
+        <div class="d-actions">
+          <button class="generate" id="d-report-submit" type="button">
+            <span class="btn-label">Log completed</span><span class="spinner" hidden></span>
+          </button>
+        </div>
+        <div class="d-schedule-note" id="d-report-note"></div>
       </section>
 
       <!-- WEEKLY TASKS -->
@@ -630,6 +678,19 @@
           </button>
         </div>
         <div class="d-korean-out" id="d-korean-out" hidden></div>
+
+        <!-- GRADE PRACTICE (Korean) -->
+        <div id="d-korean-grade-box">
+          <div class="d-k-heading">Practice &amp; grading</div>
+          <p class="hint">Write Korean sentences (one per line) using this week's words. You'll get a score, a corrected version, and an explanation in English. Passing sentences count toward your progress.</p>
+          <textarea id="d-korean-practice" class="field" spellcheck="false" placeholder="저는 매일 아침에 커피를 마셔요.&#10;환경 문제를 해결하는 것이 중요해요."></textarea>
+          <div class="d-actions">
+            <button class="generate" id="d-korean-grade" type="button">
+              <span class="btn-label">Grade my sentences</span><span class="spinner" hidden></span>
+            </button>
+          </div>
+          <div class="d-korean-graded" id="d-korean-graded" hidden></div>
+        </div>
       </section>
 
       <!-- ACCOUNTABILITY: check-ins + score -->
@@ -645,9 +706,22 @@
         </div>
         <div class="options">
           <label class="select-wrap">
-            <span>Check-in times (comma-separated, 24h)</span>
+            <span>Check-in times (comma-separated, 24h) &mdash; sets how often &amp; when</span>
             <input type="text" id="d-checkin-times" class="field" placeholder="11:30, 15:00, 18:30" />
           </label>
+          <label class="select-wrap" title="What tasks each check-in focuses on.">
+            <span>Check-in focus</span>
+            <select id="d-checkin-scope" class="field select">
+              <option value="up_to_now">Tasks due up to now</option>
+              <option value="full_day">Whole day's plan</option>
+            </select>
+          </label>
+        </div>
+        <div class="d-include-row">
+          <span class="micro">Check-in content:</span>
+          <label class="d-check"><input type="checkbox" id="d-checkin-score" checked /> Score strip</label>
+          <label class="d-check"><input type="checkbox" id="d-checkin-later" checked /> "Later today" list</label>
+          <label class="d-check"><input type="checkbox" id="d-checkin-hint" checked /> Reply instructions</label>
         </div>
         <div class="options">
           <label class="d-check"><input type="checkbox" id="d-recap" /> Send an end-of-day recap + score</label>

@@ -650,6 +650,10 @@ textarea#jd { min-height: 190px; }
 .gaps-extra label { display: block; margin-bottom: 6px; }
 textarea#gaps-notes { min-height: 70px; }
 
+/* ----- ATS text preview ----- */
+.ats-text-wrap { margin-top: 12px; }
+#ats-text-view { max-height: 340px; white-space: pre-wrap; }
+
 /* ----- ATS-ify panel ----- */
 #atsify-panel { margin-top: 22px; }
 #ats-input { width: 100%; min-height: 160px; white-space: pre; tab-size: 2; margin-top: 10px; }
@@ -693,5 +697,25 @@ textarea#gaps-notes { min-height: 70px; }
 .sp-version-view { margin-top: 14px; }
 #sp-vv-json { max-height: 320px; }
 .sp-vv-title { font-size: 14px !important; }
+
+/* ---- resume generation progress bar ---- */
+.gen-progress { margin-top: 12px; }
+.gen-progress-head {
+  display: flex; justify-content: space-between; align-items: baseline;
+  font-size: 12.5px; margin-bottom: 6px;
+}
+.gen-progress-stage { color: var(--text-soft); font-weight: 550; }
+.gen-progress-pct { color: var(--accent); font-weight: 700; font-variant-numeric: tabular-nums; }
+.gen-progress-track {
+  height: 8px; border-radius: 999px; overflow: hidden;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--glass-brd);
+}
+.gen-progress-fill {
+  display: block; height: 100%; width: 0%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  transition: width 0.35s ease;
+}
 
 .foot { margin-top: 26px; text-align: center; color: var(--text-faint); font-size: 12.5px; }

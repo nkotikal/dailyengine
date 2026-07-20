@@ -53,6 +53,8 @@ commentary before or after.
   projects: [{title, tech: ["..."], dates, bullets: [...]}]
 - A bullet is normally a string, but MAY be an object {"text": "...", "pinned": true}.
   See PINNED BULLETS below. Keep any object bullets as objects with their flag intact.
+- You MAY also include "profile_summary": "..." ONLY when the SUMMARY directive asks
+  for it (see PROFESSIONAL SUMMARY below).
 - You MAY add three extra top-level keys and no others:
   "keywords": ["..."]  - the most important job-description keywords you targeted.
   "gaps": [ {"requirement": "...", "importance": 0-100, "reason": "...", \
@@ -67,6 +69,12 @@ never add invented numbers or percentages.
 - You MAY rephrase bullets, surface skills that are genuinely implied by the work \
 already described, reorder content, and shift emphasis. Keep all factual anchors \
 intact.
+- Preserve the EXACT completion status and tense of in-progress work: distinguish \
+done vs. ongoing vs. a goal (e.g., "merged" vs. "authored, pending review" vs. \
+"autotuned tile configs (done) and now improving it to outperform CK (ongoing)"). \
+Never imply a goal or partially-done task is finished.
+- Never drop an acronym's first-use expansion: keep the "Full Name (ACRONYM)" form \
+when it is present, and do not remove it during a rewrite.
 
 OPTIMIZATION:
 - ATS: naturally weave in the job description's exact keywords and phrases wherever \
@@ -137,6 +145,14 @@ If they ask to "unpin" it, convert it back to a plain string.
 - When you must cut for one page, cut UNPINNED, least-relevant bullets first. Pinned \
 bullets are floors, not candidates for removal.
 
+PROFESSIONAL SUMMARY (the "profile_summary" field; controlled by the SUMMARY directive):
+- If SUMMARY is ON: include a top-level "profile_summary" -- a tight 1-2 line \
+professional summary tailored to THIS job, front-loading the most relevant, truthful \
+qualifications and keywords. No first person ("I"), no objective/fluff, no fabrication. \
+It should add framing, not just restate bullets. You MAY use **bold** in it sparingly.
+- If SUMMARY is OFF: do NOT include a "profile_summary" field at all (omit it entirely).
+- Preserve/refine an existing profile_summary across iterations while SUMMARY is ON.
+
 STRATEGIC BOLDING (the ** marker; controlled by the candidate's BOLDING directive):
 - Wrap short, high-impact spans in bullet text (and, sparingly, key skills) with \
 **double asterisks** to render them bold, e.g. "cut p95 latency by **38%**" or \
@@ -182,6 +198,7 @@ def _build_user_message(
     new_notes: str = "",
     instructions: str = "",
     bold_directive: str = "",
+    summary_directive: str = "",
 ) -> str:
     parts = [
         "JOB DESCRIPTION:\n" + job_description.strip(),
@@ -209,6 +226,8 @@ def _build_user_message(
         )
     if bold_directive and bold_directive.strip():
         parts.append(bold_directive.strip())
+    if summary_directive and summary_directive.strip():
+        parts.append(summary_directive.strip())
     return "\n\n".join(parts)
 
 
@@ -283,12 +302,60 @@ def _build_headers(key: str, style: str) -> dict:
     return headers
 
 
+def _stream_messages(endpoint: str, headers: dict, body: dict, timeout: int,
+                     on_progress, est_output_chars: int) -> str:
+    """Stream a Messages API response (SSE) and return the accumulated text.
+
+    Calls ``on_progress(frac)`` as text arrives so a UI can show real motion during
+    the model's generation. Fraction is estimated from received characters vs a
+    provided estimate (or an asymptotic curve when unknown). Raises on any problem
+    so the caller can fall back to a normal (non-streaming) request.
+    """
+    body = dict(body, stream=True)
+    req = urllib.request.Request(
+        endpoint, data=json.dumps(body).encode("utf-8"), method="POST", headers=headers)
+    parts = []
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        for raw in resp:  # iterate the SSE stream line by line
+            line = raw.decode("utf-8", errors="replace").strip()
+            if not line or not line.startswith("data:"):
+                continue
+            data = line[5:].strip()
+            if data == "[DONE]":
+                break
+            try:
+                evt = json.loads(data)
+            except json.JSONDecodeError:
+                continue
+            if evt.get("type") == "content_block_delta":
+                delta = evt.get("delta") or {}
+                if delta.get("type") == "text_delta":
+                    parts.append(delta.get("text", ""))
+                    if on_progress:
+                        n = sum(len(p) for p in parts)
+                        if est_output_chars and est_output_chars > 0:
+                            frac = min(0.99, n / est_output_chars)
+                        else:  # unknown length: ease toward 1 without reaching it
+                            frac = 1.0 - 2.718281828 ** (-n / 1400.0)
+                        on_progress(frac)
+    text = "".join(parts).strip()
+    if not text:
+        raise LLMError("Streamed response was empty.")
+    return text
+
+
 def _post_messages(system: str, user: str, *, key: str, model: str, max_tokens: int,
-                   timeout: int, base_url: str | None, auth_style: str | None) -> dict:
-    """Send one Messages API request and return the parsed JSON object reply."""
+                   timeout: int, base_url: str | None, auth_style: str | None,
+                   on_progress=None, est_output_chars: int = 0) -> dict:
+    """Send one Messages API request and return the parsed JSON object reply.
+
+    When ``on_progress`` is given, the response is streamed for accurate progress;
+    any streaming failure falls back to a normal request.
+    """
     base = (base_url or os.environ.get(BASE_URL_ENV) or DEFAULT_BASE_URL).rstrip("/")
     endpoint = base + "/v1/messages"
     style = (auth_style or os.environ.get(AUTH_STYLE_ENV) or "x-api-key").lower()
+    headers = _build_headers(key, style)
     body = {
         "model": model,
         "max_tokens": max_tokens,
@@ -296,9 +363,17 @@ def _post_messages(system: str, user: str, *, key: str, model: str, max_tokens: 
         "system": system,
         "messages": [{"role": "user", "content": user}],
     }
+    if on_progress:
+        try:
+            text = _stream_messages(endpoint, headers, body, timeout,
+                                    on_progress, est_output_chars)
+            on_progress(1.0)
+            return _parse_json(text)
+        except Exception:  # noqa: BLE001 - streaming unsupported/failed -> fall back
+            pass
     req = urllib.request.Request(
         endpoint, data=json.dumps(body).encode("utf-8"), method="POST",
-        headers=_build_headers(key, style),
+        headers=headers,
     )
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -308,6 +383,8 @@ def _post_messages(system: str, user: str, *, key: str, model: str, max_tokens: 
         raise LLMError(f"Anthropic API HTTP {exc.code}: {detail}") from exc
     except urllib.error.URLError as exc:
         raise LLMError(f"Network error calling Anthropic API: {exc.reason}") from exc
+    if on_progress:
+        on_progress(1.0)
     return _parse_json(_extract_text(payload))
 
 
@@ -317,17 +394,21 @@ def _is_openai(model: str | None) -> bool:
 
 
 def _complete(system: str, user: str, *, key, model, max_tokens, timeout,
-              base_url, auth_style) -> dict:
+              base_url, auth_style, on_progress=None, est_output_chars: int = 0) -> dict:
     """Route to OpenAI for gpt* models, else the Anthropic/AMD gateway."""
     if _is_openai(model):
         import openai_compat
         try:
-            return openai_compat.post_json(system, user, model=model,
-                                           max_tokens=max_tokens, timeout=timeout)
+            result = openai_compat.post_json(system, user, model=model,
+                                             max_tokens=max_tokens, timeout=timeout)
         except openai_compat.OpenAIError as exc:
             raise LLMError(str(exc)) from exc
+        if on_progress:
+            on_progress(1.0)  # openai path isn't streamed here; snap to complete
+        return result
     return _post_messages(system, user, key=key, model=model, max_tokens=max_tokens,
-                          timeout=timeout, base_url=base_url, auth_style=auth_style)
+                          timeout=timeout, base_url=base_url, auth_style=auth_style,
+                          on_progress=on_progress, est_output_chars=est_output_chars)
 
 
 def _require_key(api_key: str | None) -> str:
@@ -350,6 +431,7 @@ def extract_profile(
     timeout: int = 180,
     base_url: str | None = None,
     auth_style: str | None = None,
+    on_progress=None,
 ) -> dict:
     """Parse raw resume text / notes into the structured profile JSON schema."""
     key = api_key if _is_openai(model) else _require_key(api_key)
@@ -359,6 +441,7 @@ def extract_profile(
     profile = _complete(
         EXTRACT_SYSTEM_PROMPT, user, key=key, model=model, max_tokens=max_tokens,
         timeout=timeout, base_url=base_url, auth_style=auth_style,
+        on_progress=on_progress,  # unknown output size -> asymptotic progress
     )
     _validate(profile)
     profile.pop("keywords", None)
@@ -382,6 +465,8 @@ def optimize_profile(
     instructions: str = "",
     bold: bool = False,
     bold_spec: str = "",
+    summary: bool = False,
+    on_progress=None,
 ) -> tuple:
     """Return an LLM-optimized profile (same schema) for the given job description.
 
@@ -404,9 +489,13 @@ def optimize_profile(
     else:
         bold_directive = ("BOLDING: OFF. Do not add new ** bold markers "
                           "(keep any existing ones unless asked to remove them).")
+    summary_directive = ("SUMMARY: ON. Include a tailored 1-2 line 'profile_summary'."
+                         if summary else
+                         "SUMMARY: OFF. Do not include a 'profile_summary' field.")
     user = _build_user_message(
         profile, job_description, is_iteration=is_iteration, new_notes=new_notes,
         instructions=instructions, bold_directive=bold_directive,
+        summary_directive=summary_directive,
     )
     if extra_context and extra_context.strip():
         user += (
@@ -415,9 +504,13 @@ def optimize_profile(
             "structured profile's factual anchors):\n" + extra_context.strip()
         )
 
+    # The optimized profile JSON is ~the same size as the input profile JSON (same
+    # schema), so use that as a length estimate for accurate streaming progress.
+    est_chars = int(len(json.dumps(profile, ensure_ascii=False)) * 1.25) + 400
     optimized = _complete(
         _system_prompt(load_manifesto(manifesto_path)), user, key=key, model=model,
         max_tokens=max_tokens, timeout=timeout, base_url=base_url, auth_style=auth_style,
+        on_progress=on_progress, est_output_chars=est_chars,
     )
     _validate(optimized)
     # metadata keys; keep them off the rendered profile.

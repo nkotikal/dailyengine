@@ -18,7 +18,7 @@ import app_paths
 
 from . import compile as texc
 from .compile import CompileError
-from . import llm, store, tailor
+from . import ats, llm, store, tailor
 from .template import Density, build_document
 
 PROFILE_HINT_KEYS = ("contact", "experience", "education", "skills", "projects")
@@ -159,6 +159,8 @@ def profile_to_text(profile: dict) -> str:
     c = profile.get("contact") or {}
     if isinstance(c, dict) and c.get("name"):
         lines.append(f"# {c.get('name','')}")
+    if profile.get("profile_summary"):
+        lines.append(f"[Summary] {profile.get('profile_summary','')}")
     for edu in profile.get("education") or []:
         if isinstance(edu, dict):
             lines.append(f"[Education] {edu.get('institution','')} - {edu.get('degree','')}"
@@ -223,6 +225,7 @@ class GenerateResult:
     notes_saved: bool = False
     diff: str = ""            # unified diff of resume content vs the previous draft
     changed: bool = False     # whether this run changed the resume content
+    ats: dict = field(default_factory=dict)   # deterministic ATS keyword-coverage report
     warnings: list = field(default_factory=list)
 
 
@@ -372,8 +375,10 @@ def generate(
     fresh_pass: bool = False,
     bold: bool = False,
     bold_spec: str = "",
+    summary: bool = False,
     save_profile: bool = True,
     deterministic: bool = False,
+    ats_pass: bool = True,
     model: Optional[str] = None,
     api_key: Optional[str] = None,
     base_url: Optional[str] = None,
@@ -383,6 +388,7 @@ def generate(
     store_path: Path = None,        # resolves to the active user's store (per-user)
     optimized_path: Path = None,
     context_path: Path = None,
+    progress=None,                  # optional callback: progress(percent_float, stage_str)
 ) -> GenerateResult:
     """Generate (and optionally compile) a tailored resume. See module docstring.
 
@@ -403,6 +409,19 @@ def generate(
     out_path = Path(out_path)
     result = GenerateResult(tex="")
     model = model or os.environ.get("ANTHROPIC_MODEL") or llm.DEFAULT_MODEL
+
+    def _p(pct, stage):
+        if progress:
+            try:
+                progress(max(0.0, min(100.0, float(pct))), stage)
+            except Exception:  # noqa: BLE001 - progress must never break generation
+                pass
+
+    # Sub-progress helper: map a 0..1 fraction into a [lo, hi] overall-percent band.
+    def _band(lo, hi, stage):
+        return lambda frac: _p(lo + (hi - lo) * max(0.0, min(1.0, frac)), stage)
+
+    _p(3, "Preparing")
 
     # 1. Gather raw source material (PDF text + pasted text/notes).
     raw_parts = []
@@ -428,9 +447,11 @@ def generate(
                 "Parsing free text or a PDF into a profile requires the LLM. "
                 "Turn off Offline mode, or paste a structured profile JSON."
             )
+        _p(8, "Reading your resume\u2026")
         profile = llm.extract_profile(
             raw_context, api_key=api_key, model=model,
             base_url=base_url, auth_style=auth_style,
+            on_progress=_band(8, 28, "Reading your resume\u2026"),
         )
         result.profile_source = "parsed"
     else:
@@ -482,8 +503,10 @@ def generate(
             result.profile_source = "optimized"
 
     # 5. Tailoring.
+    llm_lo = 28 if result.profile_source == "parsed" else 10
     if deterministic:
         result.deterministic = True
+        _p(20, "Tailoring\u2026")
         if keywords is not None:
             weights = tailor.normalize_keywords(keywords)
         elif jd_text.strip():
@@ -498,12 +521,16 @@ def generate(
         if not job_description.strip():
             raise PipelineError("A job description is required for LLM optimization.")
         prev_optimized = store.load_optimized(optimized_path)  # for the change diff
+        _p(llm_lo, "Optimizing with AI\u2026")
         profile, gaps, summary = llm.optimize_profile(
             optimizer_input, job_description, api_key=api_key, model=model,
             base_url=base_url, auth_style=auth_style, extra_context=effective_context,
             is_iteration=is_iteration, new_notes=notes, instructions=(instructions or "").strip(),
-            bold=bold, bold_spec=(bold_spec or "").strip(),
+            bold=bold, bold_spec=(bold_spec or "").strip(), summary=summary,
+            on_progress=_band(llm_lo, 72, "Optimizing with AI\u2026"),
         )
+        if not summary:
+            profile.pop("profile_summary", None)  # honor the toggle even on iterations
         result.used_llm = True
         result.context_used = bool(effective_context.strip())
         result.gaps = gaps
@@ -517,12 +544,25 @@ def generate(
             store.save_optimized(profile, optimized_path)
         weights = {}
 
+    # 5b. Deterministic ATS keyword-coverage pass (zero LLM cost): surface exact JD
+    #     phrases that are truthfully supported (a synonym is already present) but were
+    #     left implicit. Never injects unsupported keywords.
+    if ats_pass and (jd_text.strip() or keywords):
+        try:
+            report = ats.apply(profile, jd_text=jd_text, keywords=keywords)
+            result.ats = report
+            if report.get("injected") and result.used_llm and save_profile:
+                store.save_optimized(profile, optimized_path)  # persist injected phrases
+        except Exception:  # noqa: BLE001 - the ATS pass must never break generation
+            pass
+
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     # 6a. .tex only.
     if not do_compile:
         result.tex = build_document(profile, weights, Density())
         out_path.write_text(result.tex, encoding="utf-8")
+        _p(100, "Done")
         return result
 
     # 6b. Compile + one-page auto-fit.
@@ -531,8 +571,13 @@ def generate(
             "pdflatex not found. Install TeX Live in WSL (see README) or use the "
             ".tex-only option."
         )
+    _p(74, "Compiling\u2026")
     workdir = out_path.parent / "_build"
-    tex, pdf, density, pages, hit_floor = texc.fit_one_page(profile, weights, workdir)
+    tex, pdf, density, pages, hit_floor = texc.fit_one_page(
+        profile, weights, workdir,
+        on_attempt=lambda done, total: _p(74 + (done / max(1, total)) * (98 - 74),
+                                          f"Compiling to one page ({min(done + 1, total)}/{total})\u2026"),
+    )
     out_path.write_text(tex, encoding="utf-8")
     final_pdf = out_path.with_suffix(".pdf")
     shutil.copyfile(pdf, final_pdf)
@@ -549,4 +594,10 @@ def generate(
             f"Could not reach one page without crossing ATS-safety floors; "
             f"stopped at {pages} pages."
         )
+    if summary and profile.get("profile_summary") and not getattr(density, "keep_summary", True):
+        result.warnings.append(
+            "The professional summary was omitted to keep the resume to one page - "
+            "trim a bullet or two (or pin fewer) to make room for it."
+        )
+    _p(100, "Done")
     return result

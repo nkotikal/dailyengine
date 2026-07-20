@@ -617,6 +617,62 @@ def render_summary(lesson: dict) -> str:
     return "\n".join(lines)
 
 
+def build_practice_feedback(results: list, date_str: str) -> dict:
+    """A standalone email giving feedback on graded Korean practice sentences.
+
+    Sent right after a reply with Korean sentences is processed, so you get your
+    score + correction + an ENGLISH explanation without waiting for tomorrow's digest.
+    """
+    import html as _h
+    n = len(results or [])
+    passed = sum(1 for r in results if int(r.get("score", 0)) >= PASS_THRESHOLD)
+    avg = round(sum(int(r.get("score", 0)) for r in results) / n) if n else 0
+    subject = f"\U0001F1F0\U0001F1F7 Korean feedback \u2014 {passed}/{n} passed \u00b7 avg {avg}"
+
+    def esc(s):
+        return _h.escape(str(s or ""))
+
+    cards = []
+    for r in results or []:
+        sc = int(r.get("score", 0))
+        color = "#5fe6b4" if sc >= PASS_THRESHOLD else ("#ffd479" if sc >= 50 else "#ff8f9c")
+        corrected = r.get("corrected", "")
+        show_corr = corrected and corrected != r.get("sentence", "")
+        cards.append(
+            f'<div style="background:#161a2e;border:1px solid #2a2f4d;border-radius:14px;'
+            f'padding:14px 16px;margin:10px 0;">'
+            f'<div style="display:flex;justify-content:space-between;align-items:center;">'
+            f'<div style="font-size:16px;color:#f1f4ff;">{esc(r.get("sentence"))}</div>'
+            f'<div style="font-size:18px;font-weight:800;color:{color};margin-left:10px;">{sc}</div></div>'
+            + (f'<div style="font-size:14px;color:#5fe6b4;margin-top:8px;">\u2192 {esc(corrected)}</div>'
+               if show_corr else "")
+            + f'<div style="font-size:13.5px;color:#c3c9de;line-height:1.6;margin-top:8px;">'
+              f'{esc(r.get("feedback"))}</div></div>')
+
+    html = (
+        f'<div style="margin:0;padding:22px 14px;background:#0a0c18;'
+        f'font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">'
+        f'<div style="max-width:560px;margin:0 auto;">'
+        f'<div style="background:linear-gradient(135deg,#6b7bff,#9a6bff);border-radius:16px;padding:20px;text-align:center;">'
+        f'<div style="font-size:12px;letter-spacing:3px;text-transform:uppercase;color:rgba(255,255,255,.9);font-weight:700;">Korean practice</div>'
+        f'<div style="font-size:24px;font-weight:800;color:#fff;margin-top:6px;">{passed}/{n} passed \u00b7 avg {avg}</div></div>'
+        + "".join(cards)
+        + f'<div style="text-align:center;color:#828aa6;font-size:12px;margin-top:16px;">'
+          f'Reply with more sentences any time to keep practicing.</div>'
+        f'</div></div>')
+
+    tlines = [f"KOREAN FEEDBACK  -  {date_str}", "=" * 40,
+              f"{passed}/{n} passed | avg {avg}", ""]
+    for r in results or []:
+        tlines.append(f"[{r.get('score',0)}] {r.get('sentence','')}")
+        if r.get("corrected") and r["corrected"] != r.get("sentence", ""):
+            tlines.append(f"    -> {r['corrected']}")
+        if r.get("feedback"):
+            tlines.append(f"    {r['feedback']}")
+        tlines.append("")
+    return {"subject": subject, "html": html, "text": "\n".join(tlines)}
+
+
 def progress_summary(state: dict) -> dict:
     prog = state.get("progress", {})
     srs = state.get("srs", {})
