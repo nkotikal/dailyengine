@@ -1,6 +1,6 @@
 """English vocabulary practice (a second language-learning track).
 
-Mirrors the shape of ``korean`` (build_lesson / render_summary / items /
+Mirrors the shape of korean (build_lesson / render_summary / items /
 progress_summary) so the digest can dispatch on the user's chosen language.
 Words already seen are remembered so nothing repeats. Works offline via a
 built-in word bank; online it asks the LLM for fresh, level-appropriate words.
