@@ -63,14 +63,7 @@ DEFAULT_CONFIG = {
     "daily_capacity_hours": 6,   # realistic focus hours/day (headspace / anti-overload)
     "openai_model": "gpt-5.4-mini",  # OpenAI fallback model (used if AMD gateway is down)
     "news_enabled": True,        # include a Headlines section
-    # --- daily accountability (email check-ins + score) ---
-    "checkins_enabled": False,       # send progress check-in emails through the day
-    "checkin_times": ["11:30", "15:00", "18:30"],  # local HH:MM slots to check in
-    # Content controls for the check-in emails (what each one includes):
-    "checkin_show_score": True,      # the points / tasks-done / % strip
-    "checkin_show_later": True,      # the "Later today" section (else only what's due by now)
-    "checkin_show_hint": True,       # the "reply done 1 3" instructions box
-    "checkin_scope": "up_to_now",    # "up_to_now" = focus on due-by-now; "full_day" = whole plan
+    # --- daily accountability (numbered plan + reply-to-update + end-of-day recap) ---
     "eod_recap_enabled": False,      # send an end-of-day recap + score email
     "eod_recap_time": "21:00",       # when the recap goes out
     "interests": [],             # topics you care about (shape headline selection)

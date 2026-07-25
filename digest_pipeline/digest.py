@@ -698,7 +698,7 @@ def build_digest(cfg: dict | None = None, *, when: datetime | None = None,
 
     # Numbered, check-off-able plan for the accountability loop (only when the user
     # has turned on check-ins or the recap). Built on a real send so indices are stable.
-    if consume and (cfg.get("checkins_enabled") or cfg.get("eod_recap_enabled")):
+    if consume and cfg.get("eod_recap_enabled"):
         try:
             plan = dayplan.build_day_plan(when, rebuild=True)
             data["dayplan"] = _dayplan_block(plan, f"Re: {subject}")

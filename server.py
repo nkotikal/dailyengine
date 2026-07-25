@@ -494,8 +494,6 @@ class Handler(BaseHTTPRequestHandler):
                 "practice": digest_korean.practice_stats(digest_store.load_korean()),
             },
             "accountability": {
-                "checkins_enabled": cfg.get("checkins_enabled", False),
-                "checkin_times": cfg.get("checkin_times", []),
                 "eod_recap_enabled": cfg.get("eod_recap_enabled", False),
                 "eod_recap_time": cfg.get("eod_recap_time", "21:00"),
                 "today": digest_dayplan.score(digest_dayplan.get_day_plan()),
