@@ -60,14 +60,13 @@ def main() -> int:
             print(f"[{stamp}] {who}: {r.get('reason', 'not sent')}")
     print(f"[{stamp}] done: {sent} digest(s) sent.")
 
-    # Progress check-ins + end-of-day recap (opt-in per user; due-time gated).
-    # Cross-process de-duped, so this is safe to run on every scheduler tick.
+    # End-of-day recap (opt-in per user; due-time gated). Cross-process de-duped,
+    # so this is safe to run on every scheduler tick.
     try:
         inter = checkins.run_interactivity_for_all_users(when)
-        ci = sum(x["checkins"].get("sent", 0) for x in inter)
         rc = sum(x["recap"].get("sent", 0) for x in inter)
-        if ci or rc:
-            print(f"[{stamp}] check-ins sent: {ci}, recaps sent: {rc}.")
+        if rc:
+            print(f"[{stamp}] recaps sent: {rc}.")
     except Exception as exc:  # noqa: BLE001 - never let this break the digest task
         print(f"[{stamp}] interactivity error: {exc}", file=sys.stderr)
     return 0

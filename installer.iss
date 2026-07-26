@@ -36,7 +36,7 @@ Name: "{autodesktop}\Daily Digest"; Filename: "{app}\{#AppExe}"; Tasks: desktopi
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; Flags: unchecked
 Name: "autostart"; Description: "Start the app automatically at logon (so the dashboard is always available)"
-Name: "morningmail"; Description: "Email the digest, plus progress check-ins and an end-of-day recap, when each is due"
+Name: "morningmail"; Description: "Email the morning digest and the end-of-day recap when each is due"
 
 [Run]
 ; Seed a .env the user can edit (only if one isn't already there), then open it.
@@ -46,8 +46,8 @@ Filename: "notepad.exe"; Parameters: """{userappdata}\DailyDigest\.env"""; Descr
 ; Register the at-logon server task (runs the windowed exe; no console).
 Filename: "schtasks"; Parameters: "/Create /TN ""DailyDigestServer"" /TR ""'{app}\{#AppExe}'"" /SC ONLOGON /F"; Flags: runhidden; Tasks: autostart
 ; Register a recurring task (every 15 min, 06:00-23:00) that sends whatever is due:
-; the morning digest, progress check-ins, and the end-of-day recap. --send is
-; cross-process de-duped so frequent ticks never double-send.
+; the morning digest and the end-of-day recap. --send is cross-process de-duped so
+; frequent ticks never double-send.
 Filename: "schtasks"; Parameters: "/Create /TN ""DailyDigestEmail"" /TR ""'{app}\{#AppExe}' --send"" /SC MINUTE /MO 15 /ST 06:00 /F"; Flags: runhidden; Tasks: morningmail
 
 ; Offer to launch the dashboard right after install.
