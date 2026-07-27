@@ -131,14 +131,6 @@
       interests: $("d-interests").value.split(",").map((s) => s.trim()).filter(Boolean),
       news_sources: newsSources,
       openai_model: $("d-openai-model").value || "gpt-5.4-mini",
-      checkins_enabled: $("d-checkins") ? $("d-checkins").checked : false,
-      checkin_times: $("d-checkin-times")
-        ? $("d-checkin-times").value.split(",").map((s) => s.trim()).filter(Boolean)
-        : [],
-      checkin_scope: ($("d-checkin-scope") && $("d-checkin-scope").value) || "up_to_now",
-      checkin_show_score: $("d-checkin-score") ? $("d-checkin-score").checked : true,
-      checkin_show_later: $("d-checkin-later") ? $("d-checkin-later").checked : true,
-      checkin_show_hint: $("d-checkin-hint") ? $("d-checkin-hint").checked : true,
       eod_recap_enabled: $("d-recap") ? $("d-recap").checked : false,
       eod_recap_time: ($("d-recap-time") && $("d-recap-time").value) || "21:00",
     };
@@ -173,12 +165,6 @@
     $("d-news-enabled").checked = cfg.news_enabled !== false;
     $("d-interests").value = (cfg.interests || []).join(", ");
     if (cfg.openai_model) $("d-openai-model").value = cfg.openai_model;
-    if ($("d-checkins")) $("d-checkins").checked = !!cfg.checkins_enabled;
-    if ($("d-checkin-times")) $("d-checkin-times").value = (cfg.checkin_times || []).join(", ");
-    if ($("d-checkin-scope")) $("d-checkin-scope").value = cfg.checkin_scope || "up_to_now";
-    if ($("d-checkin-score")) $("d-checkin-score").checked = cfg.checkin_show_score !== false;
-    if ($("d-checkin-later")) $("d-checkin-later").checked = cfg.checkin_show_later !== false;
-    if ($("d-checkin-hint")) $("d-checkin-hint").checked = cfg.checkin_show_hint !== false;
     if ($("d-recap")) $("d-recap").checked = !!cfg.eod_recap_enabled;
     if ($("d-recap-time")) $("d-recap-time").value = cfg.eod_recap_time || "21:00";
   }
@@ -953,7 +939,7 @@
     const board = $("d-score-board");
     if (!a) { if (board) { board.hidden = true; board.innerHTML = ""; } return; }
     if (pill) {
-      const on = a.checkins_enabled || a.eod_recap_enabled;
+      const on = a.eod_recap_enabled;
       pill.textContent = on ? `${(a.today && a.today.total) || 0} pts today` : "off";
       pill.className = on ? "pill good" : "pill ghost";
     }
@@ -1596,13 +1582,8 @@
     });
     $("d-capacity").addEventListener("change", () => saveConfig(true));
     // accountability (check-ins + recap)
-    ["d-checkins", "d-recap"].forEach((id) => {
-      if ($(id)) $(id).addEventListener("change", () => { saveConfig(true).then(loadStatus); });
-    });
-    ["d-checkin-times", "d-recap-time", "d-checkin-scope", "d-checkin-score",
-     "d-checkin-later", "d-checkin-hint"].forEach((id) => {
-      if ($(id)) $(id).addEventListener("change", () => saveConfig(true));
-    });
+    if ($("d-recap")) $("d-recap").addEventListener("change", () => { saveConfig(true).then(loadStatus); });
+    if ($("d-recap-time")) $("d-recap-time").addEventListener("change", () => saveConfig(true));
     // in-page sub-tab navigation
     document.querySelectorAll("#digest-subtabs .subtab").forEach((b) =>
       b.addEventListener("click", () => switchSub(b.dataset.sub)));
