@@ -122,11 +122,14 @@ async function clearProfile() {
   showError("");
   try {
     await fetch("/api/reset", { method: "POST" });
+    await fetch("/api/resume/reset", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
+    }).catch(() => {});
     $("profile").value = "";
     clearFile();
     $("result-live").hidden = true;
     $("result-empty").hidden = false;
-    $("gaps-panel").hidden = true;
+    if (typeof renderThread === "function") renderThread([]);
     await loadStatus();
     loadSavedProfile();
     if ($("profile-wrap").hidden) toggleProfile();
@@ -149,13 +152,18 @@ function b64ToBlob(b64, type) {
   return new Blob([bytes], { type });
 }
 
-function setBusy(busy, fromGaps) {
-  const btn = fromGaps ? $("regenerate") : $("generate");
-  const label = fromGaps ? "Add details & regenerate" : "Generate resume";
-  $("generate").disabled = busy;
-  $("regenerate").disabled = busy;
-  btn.querySelector(".btn-label").textContent = busy ? "Optimizing..." : label;
-  btn.querySelector(".spinner").hidden = !busy;
+let chatBusy = false;
+let editLevel = "moderate";
+
+function setChatBusy(busy) {
+  chatBusy = busy;
+  ["chat-send", "chat-remake"].forEach((id) => {
+    const b = $(id);
+    if (!b) return;
+    b.disabled = busy;
+    const sp = b.querySelector(".spinner");
+    if (sp) sp.hidden = !busy;
+  });
 }
 
 function showProgress(on) {
@@ -232,127 +240,194 @@ async function pasteFromClipboard(targetId) {
 let lastPdfUrl = null;
 let lastTexUrl = null;
 
-async function generate(opts) {
-  opts = opts || {};
+// ---- interactive resume chat ------------------------------------------
+
+function composerOpts() {
+  const o = { model: $("model").value || null };
+  const boldSpec = ($("bold-spec") && $("bold-spec").value || "").trim();
+  if (($("bold-toggle") && $("bold-toggle").checked) || boldSpec) o.bold = true;
+  if ($("summary-toggle") && $("summary-toggle").checked) o.summary = true;
+  return o;
+}
+
+// Render an assistant message's structured extras: clarifying questions + gaps.
+function renderExtras(meta) {
+  let h = "";
+  if (meta.questions && meta.questions.length) {
+    h += `<div class="q-block"><div class="q-title">Questions for you</div>` +
+      meta.questions.map((q) =>
+        `<button class="q-chip" type="button" data-q="${escapeHtml(q)}">${escapeHtml(q)}</button>`).join("") +
+      `</div>`;
+  }
+  if (meta.gaps && meta.gaps.length) {
+    h += `<div class="gap-block"><div class="q-title">Coverage gaps</div>` +
+      meta.gaps.map((g) => {
+        const tier = gapTier(g.importance || 0);
+        return `<div class="gap-mini tier-${tier}">` +
+          `<span class="gap-mini-pct">${g.importance || 0}%</span>` +
+          `<span class="gap-mini-req">${escapeHtml(g.requirement || "")}</span>` +
+          (g.suggestion ? `<div class="gap-mini-sug">${escapeHtml(g.suggestion)}</div>` : "") +
+          `</div>`;
+      }).join("") + `</div>`;
+  }
+  return h;
+}
+
+function addMessage(role, text, meta) {
+  meta = meta || {};
+  const thread = $("chat-thread");
+  const empty = thread.querySelector(".chat-empty");
+  if (empty) empty.remove();
+  const el = document.createElement("div");
+  el.className = "chat-msg " + (role === "user" ? "me" : "ai") + (meta.thinking ? " thinking" : "");
+  let html = `<div class="bubble">` +
+    (meta.thinking ? `<span class="typing"><i></i><i></i><i></i></span>` : escapeHtml(text || "")) +
+    `</div>`;
+  if (!meta.thinking) html += renderExtras(meta);
+  el.innerHTML = html;
+  thread.appendChild(el);
+  el.querySelectorAll(".q-chip").forEach((c) => c.addEventListener("click", () => {
+    const inp = $("chat-input");
+    inp.value = (inp.value ? inp.value.trim() + " " : "") + (c.dataset.q || "") + " ";
+    inp.focus();
+  }));
+  thread.scrollTop = thread.scrollHeight;
+  return el;
+}
+
+function renderThread(messages) {
+  const thread = $("chat-thread");
+  thread.innerHTML = "";
+  if (!messages || !messages.length) {
+    thread.innerHTML = `<div class="chat-empty">No conversation yet. Open <strong>Remake</strong>, ` +
+      `paste your resume + a job description, and hit <strong>Build</strong> — then chat here to refine it.</div>`;
+    return;
+  }
+  messages.forEach((m) => {
+    const meta = m.meta || {};
+    addMessage(m.role, m.text, { questions: meta.questions, gaps: meta.gaps, changed: meta.changed });
+  });
+}
+
+function applyPreview(data) {
+  updatePdfPreview(data.pdf_base64, data.tex || "");
+  setDownloadNames(data.profile_name);
+  $("tex-editor").value = data.tex || "";
+  $("tex-editor-wrap").hidden = true;
+  $("toggle-tex").textContent = "Edit LaTeX";
+  const meta = $("result-meta");
+  meta.hidden = false;
+  const tag = data.mode === "remake" ? "rebuilt" : ((data.edit_level || "edit") + " edit");
+  meta.textContent = `${data.pages ?? "?"} page · ${tag}`;
+  renderDiff(data.diff || "", data.changed, "optimized");
+  $("result-empty").hidden = true;
+  $("result-live").hidden = false;
+}
+
+async function sendTurn(mode, text) {
+  if (chatBusy) return;
   showError("");
   const jd = $("jd").value.trim();
-  if (!jd) { showError("Please paste a job description."); return; }
-
-  const profileText = $("profile").value.trim();
-  const hasInput = profileText || pendingPdfBase64;
-  if (!profileStored && !hasInput) {
-    showError("On the first run, add your resume: upload a PDF, paste resume text, or paste a profile JSON.");
-    if ($("profile-wrap").hidden) toggleProfile();
+  if (mode === "remake") {
+    const src = $("profile").value.trim();
+    if (!src && !pendingPdfBase64 && !profileStored) {
+      showError("Add a resume to build from: upload a PDF, paste resume text, or a profile JSON.");
+      if ($("profile-wrap").hidden) toggleProfile();
+      return;
+    }
+  } else if (!text) {
+    showError("Type a message to refine the resume.");
     return;
   }
 
+  const opts = composerOpts();
   const payload = {
-    jd_text: jd,
-    deterministic: $("deterministic").checked,
-    model: $("model").value || null,
+    text: text || "", mode, edit_level: editLevel, jd_text: jd,
+    model: opts.model, bold: !!opts.bold, summary: !!opts.summary,
   };
-  // Only resend resume text when seeding or the user explicitly opened the profile
-  // panel to update it. Otherwise regeneration continues from the saved draft.
-  const profileOpen = $("profile-toggle").getAttribute("aria-expanded") === "true";
-  if (profileText && (!profileStored || profileOpen || pendingPdfBase64)) {
-    payload.context_text = profileText;
+  if (mode === "remake") {
+    const src = $("profile").value.trim();
+    if (src) payload.source_text = src;
+    if (pendingPdfBase64) payload.resume_pdf_base64 = pendingPdfBase64;
   }
-  if (pendingPdfBase64) payload.resume_pdf_base64 = pendingPdfBase64;
-  if (opts.notes) payload.notes = opts.notes;
-  const instructions = ($("instructions").value || "").trim();
-  if (instructions) payload.instructions = instructions;
-  if ($("fresh-pass").checked) payload.fresh_pass = true;
-  const boldSpec = ($("bold-spec").value || "").trim();
-  if ($("bold-toggle").checked || boldSpec) payload.bold = true;
-  if (boldSpec) payload.bold_spec = boldSpec;
-  if ($("summary-toggle").checked) payload.summary = true;
 
-  setBusy(true, opts.fromGaps);
+  addMessage("user", mode === "remake" ? "Build my resume for this job." : text);
+  if (mode !== "remake") $("chat-input").value = "";
+  const thinking = addMessage("assistant", "", { thinking: true });
+  setChatBusy(true);
   showProgress(true);
   try {
-    const start = await fetch("/api/generate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+    const start = await fetch("/api/resume/message", {
+      method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
     const sj = await start.json();
-    let data;
-    if (sj && sj.ok && sj.job_id) {
-      data = await pollGenerate(sj.job_id);          // new async server
-    } else if (sj && sj.ok && (sj.tex || sj.pdf_base64)) {
-      // Old server returned the full result synchronously (no live progress).
-      data = sj;
-      setProgress(100, "Done");
-      showError("Heads up: your server is an older version, so there's no live "
-        + "progress bar. A previous instance is likely still running on this port \u2014 "
-        + "stop it and restart, then reload. Your resume still generated below.");
-    } else {
-      console.warn("Unexpected /api/generate response:", sj);
-      showError((sj && sj.error)
-        || "Could not start generation. The server may be an old instance still "
-           + "bound to this port \u2014 fully stop it, restart, and reload this page.");
+    if (!sj || !sj.ok || !sj.job_id) {
+      thinking.remove();
+      showError((sj && sj.error) || "Couldn't start — is the server up to date? Restart and reload.");
       return;
     }
-    if (!data.ok) { showError(data.error || "Generation failed."); return; }
-
-    updatePdfPreview(data.pdf_base64, data.tex);
-    setDownloadNames(data.profile_name);
-    $("tex-editor").value = data.tex;
-    $("tex-editor-wrap").hidden = true;
-    $("toggle-tex").textContent = "Edit LaTeX";
-
-    const mode = data.used_llm ? "AI-optimized" : "offline";
-    const who = data.profile_name ? ` (${data.profile_name})` : "";
-    const srcMap = {
-      parsed: "parsed from your resume" + who,
-      provided: "from your input" + who,
-      stored: "saved profile" + who,
-      optimized: "continuing prior draft" + who,
-    };
-    const src = srcMap[data.profile_source] || data.profile_source;
-    const ctx = data.context_used ? " · full context" : "";
-    const meta = $("result-meta");
-    meta.hidden = false;
-    meta.textContent = `${data.pages} page · ${mode} · ${src}${ctx} · ${data.font_pt}pt`;
-    if (data.warnings && data.warnings.length) showError(data.warnings.join(" "));
-
-    const summaryBox = $("summary-box");
-    const summaryText = $("summary-text");
-    if (data.summary) {
-      summaryText.textContent = data.summary;
-      summaryBox.hidden = false;
-    } else {
-      summaryText.textContent = "";
-      summaryBox.hidden = true;
+    const data = await pollGenerate(sj.job_id);
+    thinking.remove();
+    if (!data.ok) {
+      showError(data.error || "That turn failed.");
+      addMessage("assistant", "\u26a0\ufe0f " + (data.error || "Something went wrong."));
+      return;
     }
-
-    renderDiff(data.diff || "", data.changed, data.profile_source);
-
-    // profile is now stored; clear the textarea so regenerate won't resend it
-    if (data.profile_source === "parsed" || data.profile_source === "provided") {
+    addMessage("assistant", data.reply || (data.changed ? "Updated your resume." : "Okay."),
+               { questions: data.questions, gaps: data.gaps, changed: data.changed });
+    if (data.changed && data.pdf_base64) applyPreview(data);
+    if (mode === "remake") {
       $("profile").value = "";
+      clearFile();
+      if (!$("profile-wrap").hidden) toggleProfile();
     }
-
-    // a freshly uploaded PDF has now been parsed + stored; clear the pending file
-    clearFile();
-
-    $("result-empty").hidden = true;
-    $("result-live").hidden = false;
-
-    renderGaps(data.gaps || []);
-
-    // notes were just persisted; clear the gap inputs for the next pass
-    if (opts.fromGaps) clearGapInputs();
-
-    // refresh status (profile may now be stored)
+    if (data.warnings && data.warnings.length) showError(data.warnings.join(" "));
     loadStatus();
     loadSavedProfile();
   } catch (e) {
+    thinking.remove();
     showError("Network error: " + e.message);
   } finally {
-    setBusy(false, opts.fromGaps);
+    setChatBusy(false);
     showProgress(false);
   }
+}
+
+async function loadConversation() {
+  try {
+    const r = await fetch("/api/resume/conversation");
+    const data = await r.json();
+    if (!data.ok) { renderThread([]); return; }
+    renderThread(data.messages || []);
+    if (data.jd && !$("jd").value.trim()) $("jd").value = data.jd;
+    if (data.pdf_base64) {
+      updatePdfPreview(data.pdf_base64, data.tex || "");
+      setDownloadNames(data.profile_name);
+      $("tex-editor").value = data.tex || "";
+      const meta = $("result-meta");
+      meta.hidden = false;
+      meta.textContent = "current resume";
+      $("result-empty").hidden = true;
+      $("result-live").hidden = false;
+    }
+  } catch (e) { renderThread([]); }
+}
+
+async function resetChat() {
+  if (!confirm("Start a new conversation? This clears the chat and the current working draft (your saved base profile is kept).")) return;
+  try {
+    await fetch("/api/resume/reset", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
+    });
+  } catch (e) { /* ignore */ }
+  renderThread([]);
+  $("result-live").hidden = true;
+  $("result-empty").hidden = false;
+  $("result-meta").hidden = true;
+  showError("");
+  loadStatus();
+  loadSavedProfile();
 }
 
 function gapTier(p) {
@@ -367,64 +442,6 @@ function escapeHtml(s) {
   ));
 }
 
-function renderGaps(gaps) {
-  const panel = $("gaps-panel");
-  const list = $("gaps-list");
-  const count = $("gaps-count");
-  if (!gaps.length) {
-    list.innerHTML = `<p class="gaps-clear">No gaps - your resume covers this job description well.</p>`;
-    count.hidden = true;
-    panel.hidden = false;
-    $("gaps-notes").parentElement.hidden = false;
-    return;
-  }
-  count.hidden = false;
-  count.textContent = `${gaps.length} to consider`;
-  list.innerHTML = gaps.map((g, i) => {
-    const tier = gapTier(g.importance);
-    return `
-    <div class="gap-item tier-${tier}">
-      <div class="gap-bar-wrap" title="${g.importance}% important to this role">
-        <div class="gap-pct">${g.importance}%</div>
-        <div class="gap-bar"><span style="width:${g.importance}%"></span></div>
-      </div>
-      <div class="gap-body">
-        <div class="gap-req">${escapeHtml(g.requirement)}</div>
-        ${g.reason ? `<div class="gap-reason">${escapeHtml(g.reason)}</div>` : ""}
-        ${g.suggestion ? `<div class="gap-suggestion">${escapeHtml(g.suggestion)}</div>` : ""}
-        <input type="text" class="field gap-input" data-req="${escapeHtml(g.requirement)}"
-          placeholder="Your relevant experience (leave blank if it doesn't apply)" />
-      </div>
-    </div>`;
-  }).join("");
-  panel.hidden = false;
-  $("gaps-notes").parentElement.hidden = false;
-}
-
-function collectGapNotes() {
-  const parts = [];
-  document.querySelectorAll(".gap-input").forEach((inp) => {
-    const v = inp.value.trim();
-    if (v) parts.push(`${inp.dataset.req}: ${v}`);
-  });
-  const extra = $("gaps-notes").value.trim();
-  if (extra) parts.push(extra);
-  return parts.join("\n");
-}
-
-function clearGapInputs() {
-  document.querySelectorAll(".gap-input").forEach((inp) => { inp.value = ""; });
-  $("gaps-notes").value = "";
-}
-
-async function regenerateWithGaps() {
-  const notes = collectGapNotes();
-  if (!notes) {
-    showError("Add at least one detail above (or extra notes) before regenerating.");
-    return;
-  }
-  await generate({ notes, fromGaps: true });
-}
 
 let lastPdfB64 = null;      // current PDF (for the ATS text extraction)
 let lastProfileName = "";   // for ATS-friendly download filenames
@@ -577,12 +594,7 @@ function renderDiff(diff, changed, profileSource) {
     view.innerHTML = "";
     // Only nudge on an iteration that produced no change (a common "it stopped
     // making changes" case) - not on a first build.
-    if (changed === false && profileSource === "optimized") {
-      badge.hidden = true;
-      showError("No changes this run — the current draft already satisfies the request. "
-        + "Put a new instruction in \"Additional context / instructions\" (e.g. what to "
-        + "emphasize, shorten, or reorder) to change it.");
-    }
+    badge.hidden = true;
     return;
   }
   let adds = 0, dels = 0;
@@ -663,7 +675,6 @@ async function runAtsify() {
     $("tex-editor-wrap").hidden = true;
     $("toggle-tex").textContent = "Edit LaTeX";
     renderDiff("", null);
-    $("summary-box").hidden = true;
     const meta = $("result-meta");
     meta.hidden = false;
     const who = data.profile_name ? ` (${data.profile_name})` : "";
@@ -1078,8 +1089,38 @@ function init() {
       b.addEventListener("click", () => pasteFromClipboard(b.dataset.target));
     }
   });
-  $("generate").addEventListener("click", () => generate());
-  $("regenerate").addEventListener("click", regenerateWithGaps);
+  // interactive resume chat
+  $("chat-remake").addEventListener("click", () => sendTurn("remake"));
+  $("chat-reset").addEventListener("click", resetChat);
+  $("chat-send").addEventListener("click", () => sendTurn("edit", $("chat-input").value.trim()));
+  $("chat-input").addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      sendTurn("edit", $("chat-input").value.trim());
+    }
+  });
+  // edit-intensity segmented control
+  document.querySelectorAll("#edit-level .seg-btn").forEach((b) => {
+    b.addEventListener("click", () => {
+      editLevel = b.dataset.level || "moderate";
+      document.querySelectorAll("#edit-level .seg-btn").forEach((x) => x.classList.remove("active"));
+      b.classList.add("active");
+    });
+  });
+  // composer "more options" toggle
+  $("composer-more").addEventListener("click", () => {
+    const w = $("composer-more-wrap");
+    const open = !w.hidden;
+    w.hidden = open;
+    $("composer-more").setAttribute("aria-expanded", String(!open));
+  });
+  // JD disclosure
+  $("jd-toggle").addEventListener("click", () => {
+    const btn = $("jd-toggle");
+    const open = btn.getAttribute("aria-expanded") === "true";
+    btn.setAttribute("aria-expanded", String(!open));
+    $("jd-wrap").hidden = open;
+  });
   $("toggle-tex").addEventListener("click", () => {
     const wrap = $("tex-editor-wrap");
     wrap.hidden = !wrap.hidden;
@@ -1106,6 +1147,7 @@ function init() {
   $("sp-vv-close").addEventListener("click", () => { $("sp-version-view").hidden = true; });
   $("sp-vv-restore").addEventListener("click", () => { if (spViewingId) restoreVersion(spViewingId); });
   loadSavedProfile();
+  loadConversation();
 }
 
 document.addEventListener("DOMContentLoaded", init);

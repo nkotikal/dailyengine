@@ -230,6 +230,27 @@ class GenerateResult:
 
 
 @dataclass
+class ConverseResult:
+    """One turn of the interactive resume chat."""
+    reply: str = ""
+    changed: bool = False
+    questions: list = field(default_factory=list)
+    gaps: list = field(default_factory=list)
+    summary: str = ""
+    mode: str = "edit"
+    edit_level: str = "moderate"
+    # rendering (populated when the resume changed this turn)
+    tex: str = ""
+    pdf_path: Optional[Path] = None
+    pages: Optional[int] = None
+    font_pt: int = 11
+    diff: str = ""
+    ats: dict = field(default_factory=dict)
+    profile_name: str = ""
+    warnings: list = field(default_factory=list)
+
+
+@dataclass
 class CompileResult:
     tex: str
     pdf_path: Optional[Path] = None
@@ -361,6 +382,167 @@ def compile_from_tex(
             "tighten spacing in the LaTeX."
         )
     return CompileResult(tex=tex, pdf_path=final_pdf, pages=pages, warnings=warnings)
+
+
+def converse(
+    *,
+    user_message: str = "",
+    mode: str = "edit",                 # "remake" | "edit"
+    edit_level: str = "moderate",       # "light" | "moderate" | "aggressive"
+    jd_text: str = "",
+    source_text: str = "",
+    resume_pdf_bytes: Optional[bytes] = None,
+    bold: bool = False,
+    summary: bool = False,
+    model: Optional[str] = None,
+    api_key: Optional[str] = None,
+    base_url: Optional[str] = None,
+    auth_style: Optional[str] = None,
+    do_compile: bool = True,
+    out_path: Path = DEFAULT_OUT,
+    progress=None,
+) -> ConverseResult:
+    """One turn of the interactive resume editor.
+
+    REMAKE builds a fresh resume from pasted/uploaded material (+ JD) and starts a new
+    conversation. EDIT refines the current resume per the candidate's chat message at
+    the chosen intensity; a pure Q&A turn leaves the resume untouched. The AI may reply,
+    ask clarifying questions, and surface JD gaps each turn.
+    """
+    load_dotenv()
+    out_path = Path(out_path)
+    model = model or os.environ.get("ANTHROPIC_MODEL") or llm.DEFAULT_MODEL
+    mode = (mode or "edit").lower()
+    edit_level = (edit_level or "moderate").lower()
+    result = ConverseResult(mode=mode, edit_level=edit_level)
+
+    def _p(pct, stage):
+        if progress:
+            try:
+                progress(max(0.0, min(100.0, float(pct))), stage)
+            except Exception:  # noqa: BLE001
+                pass
+
+    _p(4, "Thinking\u2026")
+
+    # 1. Gather any freshly supplied material (PDF text / pasted text or profile JSON).
+    raw_parts = []
+    pasted_profile = None
+    if resume_pdf_bytes:
+        raw_parts.append(extract_pdf_text(resume_pdf_bytes))
+    if source_text and source_text.strip():
+        as_json = _try_profile_json(source_text)
+        if as_json is not None:
+            pasted_profile = as_json
+        else:
+            raw_parts.append(source_text.strip())
+    raw_material = "\n\n".join(p for p in raw_parts if p).strip()
+
+    remake = (mode == "remake")
+    convo = store.load_conversation()
+    effective_jd = (jd_text or "").strip() or convo.get("jd", "")
+
+    # 2. Resolve the resume the AI works from + its grounding context + history.
+    if remake:
+        if pasted_profile is None and not raw_material and store.load_profile() is None:
+            raise PipelineError(
+                "Remake needs a resume to build from - paste your resume text, upload a "
+                "PDF, or paste a profile JSON.")
+        current_profile = pasted_profile      # may be None -> AI builds from raw_material
+        extra_context = raw_material or store.load_context()
+        history = []                           # fresh thread
+    else:
+        current_profile = store.load_optimized() or store.load_profile()
+        if current_profile is None:
+            raise PipelineError(
+                "There's no resume yet. Use Remake to create one before editing.")
+        extra_context = store.load_context()
+        if raw_material:                       # rare: extra material dropped in mid-edit
+            extra_context = (extra_context + "\n\n" + raw_material).strip()
+        history = convo.get("messages", [])
+
+    prev_optimized = None if remake else store.load_optimized()
+
+    # 3. The conversational turn.
+    _p(20, "Working with the AI\u2026")
+    turn = llm.converse(
+        current_profile=current_profile, job_description=effective_jd, history=history,
+        user_message=user_message, mode=mode, edit_level=edit_level,
+        extra_context=extra_context, bold=bold, summary=summary,
+        api_key=api_key, model=model, base_url=base_url, auth_style=auth_style,
+    )
+    result.reply = turn["reply"]
+    result.questions = turn["questions"]
+    result.gaps = turn["gaps"]
+    result.summary = turn["summary"]
+    result.changed = turn["changed"]
+    new_profile = turn["profile"]
+
+    # 4. Persist material + reset the thread on a remake.
+    if remake:
+        if raw_material:
+            store.save_context(raw_material)
+        store.reset_conversation()
+
+    # 5. If the resume changed, run the ATS pass, persist, diff, and compile.
+    if result.changed and isinstance(new_profile, dict):
+        if not summary:
+            new_profile.pop("profile_summary", None)
+        if effective_jd:
+            try:
+                result.ats = ats.apply(new_profile, jd_text=effective_jd)
+            except Exception:  # noqa: BLE001
+                pass
+        # On a remake, the produced resume also seeds the saved base profile.
+        if remake:
+            base = pasted_profile if pasted_profile is not None else new_profile
+            store.save_profile(base)
+            store.archive_profile(base, source="remake")
+        store.save_optimized(new_profile)
+        if not remake:
+            result.diff = _profile_diff(prev_optimized, new_profile)
+        contact = new_profile.get("contact") or {}
+        result.profile_name = str(contact.get("name", "")).strip() if isinstance(contact, dict) else ""
+
+        if do_compile:
+            if not texc.have_pdflatex():
+                result.warnings.append("pdflatex not found - saved the resume but couldn't render a PDF.")
+            else:
+                _p(72, "Rendering to one page\u2026")
+                out_path.parent.mkdir(parents=True, exist_ok=True)
+                workdir = out_path.parent / "_build"
+                tex, pdf, density, pages, hit_floor = texc.fit_one_page(
+                    new_profile, {}, workdir,
+                    on_attempt=lambda done, total: _p(72 + (done / max(1, total)) * 24,
+                                                      f"Fitting one page ({min(done + 1, total)}/{total})\u2026"))
+                out_path.write_text(tex, encoding="utf-8")
+                final_pdf = out_path.with_suffix(".pdf")
+                shutil.copyfile(pdf, final_pdf)
+                result.tex, result.pdf_path, result.pages = tex, final_pdf, pages
+                result.font_pt = density.font_pt
+                if hit_floor and pages != 1:
+                    result.warnings.append(
+                        f"Couldn't reach one page without crossing ATS-safety floors; stopped at {pages} pages.")
+    else:
+        result.changed = False
+        cur = store.load_optimized() or store.load_profile() or {}
+        contact = cur.get("contact") or {}
+        result.profile_name = str(contact.get("name", "")).strip() if isinstance(contact, dict) else ""
+
+    # 6. Record the turn (and persist the JD for future edit turns).
+    convo = store.load_conversation()
+    if effective_jd:
+        convo["jd"] = effective_jd
+        store.save_conversation(convo)
+    if user_message.strip() or remake:
+        store.append_message("user", user_message.strip()
+                             or ("(remake from pasted material)" if remake else "(refine)"),
+                             meta={"mode": mode, "edit_level": edit_level})
+    store.append_message("assistant", result.reply, meta={
+        "changed": result.changed, "questions": result.questions,
+        "gaps": result.gaps, "summary": result.summary})
+    _p(100, "Done")
+    return result
 
 
 def generate(

@@ -132,6 +132,8 @@ class Handler(BaseHTTPRequestHandler):
             self._profile_get()
         elif self.path == "/api/profile/versions":
             self._profile_versions()
+        elif self.path == "/api/resume/conversation":
+            self._resume_conversation()
         elif self.path == "/api/digest/status":
             self._digest_status()
         elif self.path == "/api/memory":
@@ -154,6 +156,10 @@ class Handler(BaseHTTPRequestHandler):
             self._users_delete()
         elif self.path == "/api/generate":
             self._generate()
+        elif self.path == "/api/resume/message":
+            self._resume_message()
+        elif self.path == "/api/resume/reset":
+            self._resume_reset()
         elif self.path == "/api/reset":
             self._reset()
         elif self.path == "/api/compile":
@@ -1327,6 +1333,146 @@ class Handler(BaseHTTPRequestHandler):
             })
 
         threading.Thread(target=_worker, daemon=True, name=f"gen-{job_id}").start()
+        self._send_json(200, {"ok": True, "job_id": job_id})
+
+    # -- interactive resume conversation ----------------------------------
+
+    def _resume_conversation(self):
+        """The chat thread + the current rendered resume (if any) for initial load."""
+        convo = store.load_conversation()
+        pdf_b64, tex, name = "", "", ""
+        try:
+            name = store.profile_name()
+            pdf_path = Path(core.DEFAULT_OUT).with_suffix(".pdf")
+            tex_path = Path(core.DEFAULT_OUT)
+            if pdf_path.exists() and store.has_optimized():
+                pdf_b64 = base64.b64encode(pdf_path.read_bytes()).decode("ascii")
+            if tex_path.exists() and store.has_optimized():
+                tex = tex_path.read_text(encoding="utf-8")
+        except Exception:  # noqa: BLE001
+            pass
+        self._send_json(200, {
+            "ok": True,
+            "messages": convo.get("messages", []),
+            "jd": convo.get("jd", ""),
+            "has_resume": store.has_optimized() or store.has_profile(),
+            "profile_name": name,
+            "pdf_base64": pdf_b64,
+            "tex": tex,
+        })
+
+    def _resume_reset(self):
+        try:
+            data = self._read_json_body()
+        except json.JSONDecodeError:
+            data = {}
+        store.reset_conversation()
+        store.clear_optimized()
+        if isinstance(data, dict) and data.get("full"):
+            store.clear()  # also drop the base profile + context
+        self._send_json(200, {"ok": True})
+
+    def _resume_message(self):
+        try:
+            data = self._read_json_body()
+        except json.JSONDecodeError:
+            self._send_json(400, {"ok": False, "error": "Invalid request body."})
+            return
+
+        text = (data.get("text") or "").strip()
+        mode = (data.get("mode") or "edit").strip().lower()
+        edit_level = (data.get("edit_level") or "moderate").strip().lower()
+        jd_text = (data.get("jd_text") or "").strip()
+        model = data.get("model") or None
+        bold = bool(data.get("bold"))
+        summary = bool(data.get("summary"))
+
+        source_text = data.get("source_text") or data.get("profile") or ""
+        if not isinstance(source_text, str):
+            source_text = json.dumps(source_text)
+
+        resume_pdf_bytes = None
+        pdf_b64_in = data.get("resume_pdf_base64")
+        if pdf_b64_in:
+            try:
+                resume_pdf_bytes = base64.b64decode(pdf_b64_in)
+            except (ValueError, TypeError):
+                self._send_json(400, {"ok": False, "error": "Could not decode the uploaded PDF."})
+                return
+
+        if mode == "remake" and not (source_text.strip() or resume_pdf_bytes or store.has_profile()):
+            self._send_json(400, {"ok": False,
+                                  "error": "Remake needs a resume: paste text, upload a PDF, or paste a profile JSON."})
+            return
+        if mode != "remake" and not text:
+            self._send_json(400, {"ok": False, "error": "Type a message to refine the resume."})
+            return
+
+        _prune_gen_jobs()
+        job_id = uuid.uuid4().hex[:12]
+        try:
+            uid = user_context.current_user_id()
+        except Exception:  # noqa: BLE001
+            uid = None
+        with _GEN_LOCK:
+            _GEN_JOBS[job_id] = {"percent": 0.0, "stage": "Starting\u2026",
+                                 "done": False, "result": None, "ts": time.time()}
+        _log(f"resume chat job {job_id} started (mode={mode}, level={edit_level}, user={uid})")
+
+        def _progress(pct, stage):
+            with _GEN_LOCK:
+                j = _GEN_JOBS.get(job_id)
+                if j:
+                    j.update(percent=pct, stage=stage, ts=time.time())
+
+        def _finish(payload):
+            with _GEN_LOCK:
+                j = _GEN_JOBS.get(job_id)
+                if j:
+                    j.update(done=True, result=payload, ts=time.time())
+                    if payload.get("ok"):
+                        j["percent"] = 100.0
+                        j["stage"] = "Done"
+
+        def _worker():
+            def run():
+                return core.converse(
+                    user_message=text, mode=mode, edit_level=edit_level, jd_text=jd_text,
+                    source_text=source_text, resume_pdf_bytes=resume_pdf_bytes,
+                    bold=bold, summary=summary, model=model, do_compile=True,
+                    progress=_progress)
+            try:
+                if uid:
+                    with user_context.using_user(uid):
+                        result = run()
+                else:
+                    result = run()
+            except CompileError as exc:
+                _finish({"ok": False, "error": str(exc)}); return
+            except core.PipelineError as exc:
+                _finish({"ok": False, "error": str(exc)}); return
+            except llm.LLMError as exc:
+                _finish({"ok": False, "error": f"LLM error: {exc}"}); return
+            except Exception as exc:  # noqa: BLE001
+                traceback.print_exc()
+                _finish({"ok": False, "error": f"{type(exc).__name__}: {exc}"}); return
+            pdf_b64 = ""
+            try:
+                if result.pdf_path and Path(result.pdf_path).exists():
+                    pdf_b64 = base64.b64encode(Path(result.pdf_path).read_bytes()).decode("ascii")
+            except Exception:  # noqa: BLE001
+                pass
+            _finish({
+                "ok": True, "reply": result.reply, "changed": result.changed,
+                "questions": result.questions, "gaps": result.gaps,
+                "summary": result.summary, "mode": result.mode,
+                "edit_level": result.edit_level, "pages": result.pages,
+                "diff": result.diff, "ats": result.ats,
+                "profile_name": result.profile_name, "warnings": result.warnings,
+                "tex": result.tex, "pdf_base64": pdf_b64,
+            })
+
+        threading.Thread(target=_worker, daemon=True, name=f"chat-{job_id}").start()
         self._send_json(200, {"ok": True, "job_id": job_id})
 
     def _generate_status(self):

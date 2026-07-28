@@ -520,6 +520,165 @@ def optimize_profile(
     return optimized, gaps, summary
 
 
+CONVERSE_SYSTEM_PROMPT = """\
+You are an expert technical recruiter and senior resume writer collaborating with a \
+candidate IN AN ONGOING CHAT to build and refine a single-page, ATS-friendly resume. \
+Each turn you get the current resume, the target job description, the conversation so \
+far, and the candidate's latest message. You reply conversationally AND, when useful, \
+edit the resume - then a deterministic renderer turns your profile JSON into the PDF.
+
+RESPOND WITH ONLY ONE valid JSON object (no markdown, no fences):
+{
+  "reply": "a short, friendly chat message to the candidate: what you changed and why, \
+or your answer/observation, or a question. 1-4 sentences, plain text.",
+  "changed": true | false,   // true ONLY if you edited the resume this turn
+  "profile": { ...full optimized profile in the schema below... } | null,  // include \
+ONLY when changed=true; otherwise null
+  "questions": ["a targeted clarifying question that would materially improve the resume", ...],
+  "gaps": [ {"requirement": "...", "importance": 0-100, "reason": "...", "suggestion": "..."} ],
+  "summary": "optional one-line note of what changed this turn (or '')"
+}
+
+PROFILE SCHEMA (preserve field names exactly):
+  contact: {name, email, phone, linkedin, github}
+  education: [{institution, location, degree, gpa, dates}]
+  skills: {"<Category>": ["skill", ...], ...}
+  experience: [{company, location, role, dates, bullets: [...]}]
+  projects: [{title, tech: ["..."], dates, bullets: [...]}]
+  A bullet is a string OR {"text": "...", "pinned": true}. Keep pinned bullets verbatim \
+  and never drop them. You MAY include "profile_summary": "..." only if summary is ON.
+
+TRUTHFULNESS (critical): never invent or alter employers, titles, dates, schools, \
+degrees, GPAs, or metrics; never fabricate numbers. You may rephrase, reorder, surface \
+genuinely-implied skills, and shift emphasis. Preserve the exact completion status/tense \
+of in-progress work.
+
+OPTIMIZATION: weave in the JD's exact keywords where they truthfully apply; lead with \
+the highest-impact, most-relevant content; strong action verbs; concrete execution + \
+real outcomes over buzzwords; be ruthless about one page (drop weak bullets, not add \
+filler). Keep the contact block unchanged.
+
+MODES:
+- REMAKE: (re)build the resume from scratch from the CANDIDATE MATERIAL + JD. Always \
+produce a complete optimized profile with changed=true. Open with a brief, warm reply \
+summarizing what you built and 1-3 questions to sharpen it.
+- EDIT: refine the CURRENT RESUME per the candidate's message. Set changed=true and \
+return a profile ONLY if you actually modify it; for a pure question/answer/advice turn \
+set changed=false and profile=null.
+
+EDIT LEVELS (only in EDIT mode):
+- LIGHT: surgical only - wording, keyword, and ordering tweaks. Preserve structure, \
+section order, and existing bullet wording except the minimum needed. Never rewrite or \
+drop bullets wholesale.
+- MODERATE: reshape - reorder, tighten, merge or trim weak bullets, sharpen phrasing and \
+emphasis, reprioritize within sections. Keep the section set.
+- AGGRESSIVE: rework entire sections as needed - rewrite bullets from the underlying \
+evidence for maximum impact, restructure and reprioritize skills, cut hard for one page. \
+Still strictly truthful.
+
+INTERACTION: Ask at most 1-3 questions per turn, only when an answer would genuinely \
+improve the resume. NEVER re-ask something already answered in the conversation. Put \
+JD requirements you can't yet substantiate in "gaps" (do not fabricate them into the \
+resume). Be concise and encouraging."""
+
+
+def _history_text(history, limit: int = 14) -> str:
+    if not history:
+        return "(this is the first turn)"
+    rows = []
+    for m in history[-limit:]:
+        role = "Candidate" if (m.get("role") == "user") else "You"
+        text = str(m.get("text") or "").strip()
+        if text:
+            rows.append(f"{role}: {text}")
+    return "\n".join(rows) or "(this is the first turn)"
+
+
+def converse(
+    *,
+    current_profile: dict | None,
+    job_description: str = "",
+    history=None,
+    user_message: str = "",
+    mode: str = "edit",
+    edit_level: str = "moderate",
+    extra_context: str = "",
+    bold: bool = False,
+    summary: bool = False,
+    api_key: str | None = None,
+    model: str = DEFAULT_MODEL,
+    max_tokens: int = 8192,
+    timeout: int = 180,
+    base_url: str | None = None,
+    auth_style: str | None = None,
+    manifesto_path: Path = DEFAULT_MANIFESTO,
+) -> dict:
+    """One conversational turn. Returns
+    {reply, changed, profile(dict|None), questions[list], gaps[list], summary}.
+
+    The model edits the resume only when warranted (``changed``); pure Q&A turns leave
+    the resume untouched (``profile`` is None) so nothing is re-rendered needlessly.
+    """
+    key = api_key if _is_openai(model) else _require_key(api_key)
+    mode = (mode or "edit").lower()
+    edit_level = (edit_level or "moderate").lower()
+
+    parts = ["TARGET JOB DESCRIPTION:\n" + (job_description or "(none provided)").strip()]
+    parts.append(f"MODE: {mode.upper()}"
+                 + (f"    EDIT LEVEL: {edit_level.upper()}" if mode == "edit" else ""))
+    parts.append("BOLDING: " + ("ON (add sparing **bold** on key metrics/terms)" if bold
+                                else "OFF (add no new ** markers)"))
+    parts.append("SUMMARY: " + ("ON (include a tailored profile_summary)" if summary
+                                else "OFF (no profile_summary field)"))
+    if mode == "remake" or not current_profile:
+        parts.append("CURRENT RESUME: (none yet - build it from the candidate material)")
+    else:
+        parts.append("CURRENT RESUME (edit THIS at the given level; preserve untouched "
+                     "content exactly):\n" + json.dumps(current_profile, ensure_ascii=False, indent=2))
+    if extra_context and extra_context.strip():
+        parts.append("CANDIDATE MATERIAL (truthful source - original resume text and/or "
+                     "notes; never contradict it):\n" + extra_context.strip())
+    parts.append("CONVERSATION SO FAR:\n" + _history_text(history))
+    parts.append("CANDIDATE'S LATEST MESSAGE:\n" + (user_message or "(no message - just refine)").strip())
+
+    system = _system_prompt_converse(load_manifesto(manifesto_path))
+    data = _complete(system, "\n\n".join(parts), key=key, model=model,
+                     max_tokens=max_tokens, timeout=timeout, base_url=base_url,
+                     auth_style=auth_style)
+
+    reply = str(data.get("reply") or "").strip()
+    changed = bool(data.get("changed"))
+    profile = data.get("profile")
+    if changed and isinstance(profile, dict):
+        _validate(profile)
+        profile.pop("keywords", None)
+        profile.pop("gaps", None)
+        profile.pop("questions", None)
+    else:
+        profile = None
+        changed = False
+    questions = [str(q).strip() for q in (data.get("questions") or []) if str(q).strip()]
+    gaps = _normalize_gaps(data.get("gaps", []))
+    return {
+        "reply": reply or ("Updated your resume." if changed else "Okay."),
+        "changed": changed,
+        "profile": profile,
+        "questions": questions[:5],
+        "gaps": gaps,
+        "summary": str(data.get("summary") or "").strip(),
+    }
+
+
+def _system_prompt_converse(manifesto: str) -> str:
+    if not manifesto.strip():
+        return CONVERSE_SYSTEM_PROMPT
+    return (CONVERSE_SYSTEM_PROMPT
+            + "\n\nApply the following RESUME MANIFESTO as authoritative guidance for "
+            "every content decision; never let it override the truthfulness or "
+            "output-format rules.\n\n===== RESUME MANIFESTO =====\n"
+            + manifesto.strip() + "\n===== END MANIFESTO =====")
+
+
 def _normalize_gaps(raw) -> list:
     """Coerce model gaps into [{requirement, importance:int 0-100, reason, suggestion}], sorted desc."""
     if not isinstance(raw, list):

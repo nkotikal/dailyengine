@@ -91,167 +91,142 @@
     <div class="view" id="view-resume" hidden>
     <section class="chips" id="status-chips" aria-live="polite"></section>
 
-    <div class="grid">
-      <!-- INPUT PANEL -->
-      <section class="glass panel input-panel">
+    <div class="resume-layout">
+      <!-- LEFT: interactive chat -->
+      <section class="glass panel chat-col">
         <div class="section-head">
-          <h2>Context</h2>
+          <h2>Resume studio</h2>
           <div class="head-actions">
             <span class="pill" id="profile-pill">checking...</span>
-            <button class="link-btn danger" id="clear-profile" type="button" hidden>Clear saved profile</button>
+            <button class="link-btn" id="chat-reset" type="button">New</button>
+            <button class="link-btn danger" id="clear-profile" type="button" hidden>Clear profile</button>
           </div>
         </div>
-        <p class="hint" id="profile-hint">Your saved profile is used automatically.</p>
 
-        <button class="disclosure" id="profile-toggle" type="button" aria-expanded="false">
-          <span class="chev">›</span><span id="profile-toggle-label">Add or update your resume / profile</span>
+        <!-- Target job description (persisted; used by remake + every edit) -->
+        <button class="disclosure" id="jd-toggle" type="button" aria-expanded="true">
+          <span class="chev">›</span><span>Target job description</span>
         </button>
+        <div class="collapsible" id="jd-wrap">
+          <textarea id="jd" class="field" placeholder="Paste the job description you're tailoring to..."></textarea>
+          <div class="row-actions">
+            <button class="link-btn" id="load-sample-jd" type="button">Load sample JD</button>
+            <button class="link-btn" id="paste-jd" type="button" data-target="jd">Paste from clipboard</button>
+          </div>
+        </div>
 
+        <!-- REMAKE: (re)build from a pasted/uploaded resume -->
+        <button class="disclosure" id="profile-toggle" type="button" aria-expanded="false">
+          <span class="chev">›</span><span id="profile-toggle-label">Remake &mdash; paste a resume to (re)build from</span>
+        </button>
         <div class="collapsible" id="profile-wrap" hidden>
+          <p class="hint" id="profile-hint">Your saved profile is used automatically.</p>
           <div class="upload-row">
             <label class="btn-glass subtle upload-btn">
-              <span>Upload resume</span>
+              <span>Upload</span>
               <input type="file" id="resume-file" accept=".pdf,.txt,.json,.md" hidden />
             </label>
             <span class="file-chip" id="file-chip" hidden></span>
             <span class="micro">PDF, TXT, or JSON</span>
           </div>
           <textarea id="profile" class="field" spellcheck="false"
-            placeholder="Paste your FULL resume (or a profile JSON) here. This becomes your profile and replaces any saved one. To only add small details (location, extra skills), generate first and use the Coverage gaps panel."></textarea>
+            placeholder="Paste your FULL resume (or a profile JSON), plus any extra info you want considered."></textarea>
           <div class="row-actions">
-            <button class="link-btn" id="load-sample-profile" type="button">Load sample profile JSON</button>
+            <button class="link-btn" id="load-sample-profile" type="button">Load sample</button>
             <button class="link-btn" id="paste-profile" type="button" data-target="profile">Paste from clipboard</button>
           </div>
+          <button class="generate" id="chat-remake" type="button">
+            <span class="btn-label">Build resume from this</span><span class="spinner" hidden></span>
+          </button>
+          <p class="micro">Remake rebuilds the resume from scratch and starts a fresh conversation.</p>
         </div>
 
-        <div class="section-head spaced">
-          <h2>Job description</h2>
-          <span class="req">required</span>
-        </div>
-        <textarea id="jd" class="field" placeholder="Paste the full job description here..."></textarea>
-        <div class="row-actions">
-          <button class="link-btn" id="load-sample-jd" type="button">Load sample JD</button>
-          <button class="link-btn" id="paste-jd" type="button" data-target="jd">Paste from clipboard</button>
-        </div>
+        <!-- CHAT THREAD -->
+        <div class="chat-thread" id="chat-thread"></div>
 
-        <div class="section-head spaced">
-          <h2>Additional context / instructions</h2>
-          <span class="pill ghost">optional</span>
-        </div>
-        <p class="hint">Extra context or directives for the AI. This is also how you ask for changes on a regenerate, e.g. "emphasize CUDA &amp; compiler work", "make bullets more concise", "prioritize the AMD role". <strong>Keep a bullet that keeps disappearing?</strong> Say "<strong>pin the bullet about &lt;topic&gt;</strong>" - pinned bullets are never reworded and never trimmed to fit one page (other, lower-value bullets are cut first). Say "unpin ..." to release it. Truthful facts to add belong in Coverage gaps below.</p>
-        <textarea id="instructions" class="field" placeholder="e.g. Emphasize GPU/CUDA and compiler execution with concrete impact; tighten the older roles to one line each."></textarea>
-        <div class="row-actions">
-          <button class="link-btn" id="paste-instructions" type="button" data-target="instructions">Paste from clipboard</button>
-        </div>
-
-        <div class="section-head spaced">
-          <h2>Strategic bolding</h2>
-          <label class="switch-wrap" title="Let the AI bold the most important spans in each bullet.">
-            <span>Auto-bold</span>
-            <span class="switch">
-              <input type="checkbox" id="bold-toggle" />
-              <span class="track"><span class="thumb"></span></span>
-            </span>
-          </label>
-        </div>
-        <p class="hint">Make key things stand out with bold (ATS-safe - bold is just weight). Flip on <strong>Auto-bold</strong> to let the AI pick the highest-impact spans (metrics + top tech), or say exactly what to bold below. It refines and persists on each regenerate.</p>
-        <input type="text" id="bold-spec" class="field" placeholder="What to bold (optional), e.g. metrics &amp; numbers, key technologies, product/company names, scope" />
-
-        <div class="section-head spaced">
-          <h2>Professional summary</h2>
-          <label class="switch-wrap" title="Add a short, JD-tailored summary at the top. Dropped first if space is tight.">
-            <span>Include summary</span>
-            <span class="switch">
-              <input type="checkbox" id="summary-toggle" />
-              <span class="track"><span class="thumb"></span></span>
-            </span>
-          </label>
-        </div>
-        <p class="hint">Optional 1-2 line summary at the top, tailored to the job. Best for stretch/pivot roles; usually skippable when your experience already fits. It's dropped first if the page gets tight, so it never pushes real content off.</p>
-
-        <div class="options">
-          <label class="select-wrap">
-            <span>Model</span>
-            <select id="model" class="field select">
-              <option value="">Default</option>
-              <option value="claude-opus-4-8">Claude Opus 4.8 (best)</option>
-              <option value="claude-sonnet-4-6">Claude Sonnet 4.6 (fast)</option>
-              <option value="claude-haiku-4-5">Claude Haiku 4.5 (fastest)</option>
-              <option value="gpt-5.4-mini">GPT-5.4 mini (OpenAI)</option>
-              <option value="gpt-5.4">GPT-5.4 (OpenAI)</option>
-              <option value="gpt-4o-mini">GPT-4o mini (OpenAI)</option>
-              <option value="gpt-4o">GPT-4o (OpenAI)</option>
-            </select>
-          </label>
-
-          <label class="switch-wrap" title="Skip the AI; deterministic keyword tailoring only.">
-            <span>Offline mode</span>
-            <span class="switch">
-              <input type="checkbox" id="deterministic" />
-              <span class="track"><span class="thumb"></span></span>
-            </span>
-          </label>
-
-          <label class="switch-wrap" title="Re-optimize from your base profile instead of iterating the current draft. Use this if regenerations have converged and stopped changing.">
-            <span>Fresh pass</span>
-            <span class="switch">
-              <input type="checkbox" id="fresh-pass" />
-              <span class="track"><span class="thumb"></span></span>
-            </span>
-          </label>
-        </div>
-
-        <button class="generate" id="generate" type="button">
-          <span class="btn-label">Generate resume</span>
-          <span class="spinner" hidden></span>
-        </button>
-
-        <div class="gen-progress" id="gen-progress" hidden>
-          <div class="gen-progress-head">
-            <span class="gen-progress-stage" id="gen-progress-stage">Starting&hellip;</span>
-            <span class="gen-progress-pct" id="gen-progress-pct">0%</span>
+        <!-- COMPOSER (edit mode) -->
+        <div class="chat-composer">
+          <div class="composer-opts">
+            <div class="seg" id="edit-level" role="group" aria-label="Edit intensity">
+              <button class="seg-btn" data-level="light" type="button" title="Surgical wording/ordering tweaks">Light</button>
+              <button class="seg-btn active" data-level="moderate" type="button" title="Reorder, tighten, trim weak bullets">Moderate</button>
+              <button class="seg-btn" data-level="aggressive" type="button" title="Rework entire sections for impact">Aggressive</button>
+            </div>
+            <button class="chip-btn" id="composer-more" type="button" aria-expanded="false" title="More options">&#9881;</button>
           </div>
-          <div class="gen-progress-track"><span class="gen-progress-fill" id="gen-progress-fill"></span></div>
+          <div class="composer-more-wrap" id="composer-more-wrap" hidden>
+            <label class="select-wrap">
+              <span>Model</span>
+              <select id="model" class="field select">
+                <option value="">Default</option>
+                <option value="claude-opus-4-8">Claude Opus 4.8 (best)</option>
+                <option value="claude-sonnet-4-6">Claude Sonnet 4.6 (fast)</option>
+                <option value="claude-haiku-4-5">Claude Haiku 4.5 (fastest)</option>
+                <option value="gpt-5.4-mini">GPT-5.4 mini (OpenAI)</option>
+                <option value="gpt-5.4">GPT-5.4 (OpenAI)</option>
+                <option value="gpt-4o-mini">GPT-4o mini (OpenAI)</option>
+                <option value="gpt-4o">GPT-4o (OpenAI)</option>
+              </select>
+            </label>
+            <label class="switch-wrap" title="Let the AI bold the most important spans.">
+              <span>Auto-bold</span>
+              <span class="switch"><input type="checkbox" id="bold-toggle" /><span class="track"><span class="thumb"></span></span></span>
+            </label>
+            <input type="text" id="bold-spec" class="field" placeholder="What to bold (optional)" />
+            <label class="switch-wrap" title="Add a short JD-tailored summary at the top.">
+              <span>Summary</span>
+              <span class="switch"><input type="checkbox" id="summary-toggle" /><span class="track"><span class="thumb"></span></span></span>
+            </label>
+          </div>
+          <div class="composer-row">
+            <textarea id="chat-input" class="field" rows="2"
+              placeholder="Tell the AI what to change — e.g. &quot;lead with the AMD role and quantify the kernel work&quot; — or answer its questions. Say &quot;pin the bullet about X&quot; to lock a bullet."></textarea>
+            <button class="chat-send" id="chat-send" type="button" title="Send (Enter)">
+              <span class="btn-label">Send</span><span class="spinner" hidden></span>
+            </button>
+          </div>
+          <div class="gen-progress" id="gen-progress" hidden>
+            <div class="gen-progress-head">
+              <span class="gen-progress-stage" id="gen-progress-stage">Starting&hellip;</span>
+              <span class="gen-progress-pct" id="gen-progress-pct">0%</span>
+            </div>
+            <div class="gen-progress-track"><span class="gen-progress-fill" id="gen-progress-fill"></span></div>
+          </div>
+          <div class="error" id="error" hidden></div>
         </div>
-
-        <div class="error" id="error" hidden></div>
       </section>
 
-      <!-- RESULT PANEL -->
-      <section class="glass panel result-panel">
+      <!-- RIGHT: live preview -->
+      <section class="glass panel preview-col">
         <div class="section-head">
-          <h2>Preview</h2>
+          <h2>Live preview</h2>
           <span class="pill ghost" id="result-meta" hidden></span>
         </div>
 
         <div class="result-empty" id="result-empty">
           <div class="empty-art" aria-hidden="true"></div>
-          <p>Your tailored resume will appear here.</p>
+          <p>Paste a resume + JD, open <strong>Remake</strong>, and hit <strong>Build</strong>. Then just chat to refine it &mdash; the preview updates each turn.</p>
         </div>
 
         <div class="result-live" id="result-live" hidden>
-          <div class="summary-box" id="summary-box" hidden>
-            <div class="summary-label">AI notes</div>
-            <p class="summary-text" id="summary-text"></p>
-          </div>
           <iframe id="pdf-frame" title="Resume PDF preview"></iframe>
           <div class="result-actions">
-            <a class="btn-glass" id="download-pdf" download="resume.pdf">Download PDF</a>
-            <a class="btn-glass subtle" id="download-tex" download="resume.tex">Download .tex</a>
+            <a class="btn-glass" id="download-pdf" download="resume.pdf">PDF</a>
+            <a class="btn-glass subtle" id="download-tex" download="resume.tex">.tex</a>
             <button class="btn-glass subtle" id="toggle-tex" type="button">Edit LaTeX</button>
-            <button class="btn-glass subtle" id="toggle-diff" type="button" hidden>View changes <span id="diff-badge" class="diff-badge" hidden></span></button>
-            <button class="btn-glass subtle" id="ats-text-btn" type="button">View ATS text</button>
+            <button class="btn-glass subtle" id="toggle-diff" type="button" hidden>Changes <span id="diff-badge" class="diff-badge" hidden></span></button>
+            <button class="btn-glass subtle" id="ats-text-btn" type="button">ATS text</button>
           </div>
           <div class="ats-text-wrap" id="ats-text-wrap" hidden>
-            <p class="hint">This is the raw text layer an ATS extracts from your PDF (your "select-all &rarr; copy" view). Check that employer, title, dates, and keywords all read cleanly and in order.</p>
+            <p class="hint">The raw text layer an ATS extracts from your PDF. Check that employer, title, dates, and keywords read cleanly and in order.</p>
             <pre class="tex-view mono" id="ats-text-view"></pre>
           </div>
           <div class="diff-wrap" id="diff-wrap" hidden>
-            <p class="hint">Git-style diff of your resume content vs. the previous version. <span class="diff-add-key">green</span> = added, <span class="diff-del-key">red</span> = removed.</p>
+            <p class="hint">Diff of your resume content vs. the previous turn. <span class="diff-add-key">green</span> = added, <span class="diff-del-key">red</span> = removed.</p>
             <pre class="diff-view mono" id="diff-view"></pre>
           </div>
           <div class="tex-editor-wrap" id="tex-editor-wrap" hidden>
-            <p class="hint tex-hint">Edit the LaTeX below, then recompile. Changes apply to the PDF only — use Generate again to re-run the AI.</p>
+            <p class="hint tex-hint">Edit the LaTeX below, then recompile. Changes apply to the PDF only — chat to re-run the AI.</p>
             <textarea id="tex-editor" class="field tex-view mono" spellcheck="false"></textarea>
             <button class="btn-glass" id="recompile-tex" type="button">
               <span class="btn-label">Recompile PDF</span>
@@ -286,32 +261,6 @@
         <span class="spinner" hidden></span>
       </button>
       <div class="error" id="ats-error" hidden></div>
-    </section>
-
-    <!-- COVERAGE GAPS PANEL -->
-    <section class="glass panel gaps-panel" id="gaps-panel" hidden>
-      <div class="section-head">
-        <h2>Coverage gaps</h2>
-        <span class="pill ghost" id="gaps-count" hidden></span>
-      </div>
-      <p class="hint" id="gaps-hint">
-        Job-description requirements the AI could not truthfully fit into your resume,
-        ranked by importance. If any actually apply to you, add the real details below
-        and regenerate - it's saved so each pass closes more gaps.
-      </p>
-
-      <div class="gaps-list" id="gaps-list"></div>
-
-      <div class="gaps-extra">
-        <label class="micro" for="gaps-notes">Anything else to add (optional)</label>
-        <textarea id="gaps-notes" class="field" spellcheck="false"
-          placeholder="Add any other truthful experience, skills, or metrics you want considered next time."></textarea>
-      </div>
-
-      <button class="generate" id="regenerate" type="button">
-        <span class="btn-label">Add details &amp; regenerate</span>
-        <span class="spinner" hidden></span>
-      </button>
     </section>
 
     <!-- SAVED PROFILE & HISTORY -->

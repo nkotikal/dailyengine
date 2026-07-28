@@ -34,6 +34,10 @@ def _profiles_dir() -> Path:
     return user_context.resume_dir() / "profiles"
 
 
+def _conversation_path() -> Path:
+    return user_context.resume_dir() / "conversation.json"
+
+
 def __getattr__(name: str):
     """Backwards-compatible dynamic constants (resolve to the current user)."""
     mapping = {
@@ -242,6 +246,53 @@ def load_context(path: Path = None) -> str:
     if not path.exists():
         return ""
     return path.read_text(encoding="utf-8")
+
+
+# --- interactive resume conversation ---------------------------------------
+
+def load_conversation(path: Path = None) -> dict:
+    """The ongoing resume chat: {"messages": [{role, text, at, meta}], "created_at"}."""
+    path = Path(path) if path else _conversation_path()
+    if not path.exists():
+        return {"messages": [], "created_at": ""}
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return {"messages": [], "created_at": ""}
+    if not isinstance(data, dict) or not isinstance(data.get("messages"), list):
+        return {"messages": [], "created_at": ""}
+    return data
+
+
+def save_conversation(convo: dict, path: Path = None) -> Path:
+    path = Path(path) if path else _conversation_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(convo or {"messages": []}, f, indent=2, ensure_ascii=False)
+    return path
+
+
+def append_message(role: str, text: str, meta: dict = None, path: Path = None) -> dict:
+    """Append one chat message (role: 'user'|'assistant'). ``meta`` carries structured
+    extras on assistant turns (questions, gaps, whether the resume changed, etc.)."""
+    convo = load_conversation(path)
+    if not convo.get("created_at"):
+        convo["created_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+    msg = {"role": role, "text": text or "",
+           "at": time.strftime("%Y-%m-%d %H:%M:%S")}
+    if meta:
+        msg["meta"] = meta
+    convo.setdefault("messages", []).append(msg)
+    convo["messages"] = convo["messages"][-200:]  # keep the thread bounded
+    save_conversation(convo, path)
+    return msg
+
+
+def reset_conversation(path: Path = None) -> None:
+    p = Path(path) if path else _conversation_path()
+    if p.exists():
+        p.unlink()
 
 
 def has_context(path: Path = None) -> bool:
