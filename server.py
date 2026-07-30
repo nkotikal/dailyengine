@@ -42,6 +42,7 @@ from digest_pipeline import dayplan as digest_dayplan
 from digest_pipeline import gcal as digest_gcal
 from digest_pipeline import memory as digest_memory
 from digest_pipeline import tasks as digest_tasks
+from digest_pipeline import homebase as digest_homebase
 from digest_pipeline import news as digest_news
 from digest_pipeline import inbox_commands as digest_replies
 from digest_pipeline.email_send import EmailError
@@ -136,6 +137,8 @@ class Handler(BaseHTTPRequestHandler):
             self._resume_conversation()
         elif self.path == "/api/digest/status":
             self._digest_status()
+        elif self.path == "/api/homebase/state":
+            self._homebase_state()
         elif self.path == "/api/memory":
             self._memory_list()
         elif self.path.startswith("/static/"):
@@ -246,6 +249,20 @@ class Handler(BaseHTTPRequestHandler):
             self._subtask_update()
         elif self.path == "/api/digest/tasks/subtask/delete":
             self._subtask_delete()
+        elif self.path == "/api/homebase/meta":
+            self._homebase_meta()
+        elif self.path == "/api/homebase/prefs":
+            self._homebase_prefs()
+        elif self.path == "/api/homebase/note":
+            self._homebase_note()
+        elif self.path == "/api/homebase/chat":
+            self._homebase_chat()
+        elif self.path == "/api/homebase/chat/reset":
+            self._homebase_chat_reset()
+        elif self.path == "/api/homebase/breakdown":
+            self._homebase_breakdown()
+        elif self.path == "/api/homebase/reset-progress":
+            self._homebase_reset_progress()
         else:
             self._send(404, "Not found", "text/plain; charset=utf-8")
 
@@ -834,7 +851,8 @@ class Handler(BaseHTTPRequestHandler):
         else:
             digest_store.save_config({"weekly_goals": weekly_text})
         cfg = digest_store.load_config()
-        use_llm = not bool(cfg.get("offline"))
+        # Home Base picks its parser per run; everything else follows Offline mode.
+        use_llm = bool(data["use_llm"]) if "use_llm" in data else not bool(cfg.get("offline"))
         replace = bool(data.get("replace"))
         try:
             if replace:
@@ -953,6 +971,95 @@ class Handler(BaseHTTPRequestHandler):
         node_id = data.get("id") or data.get("sub_id", "")
         digest_store.delete_subtask(node_id)
         self._send_json(200, self._tasks_payload())
+
+    # -- Home Base (3D task cosmos) ----------------------------------------
+
+    def _homebase_body(self):
+        """Read a JSON body, answering 400 itself if it is malformed."""
+        try:
+            return self._read_json_body(), True
+        except json.JSONDecodeError:
+            self._send_json(400, {"ok": False, "error": "Invalid request body."})
+            return {}, False
+
+    def _homebase_state(self):
+        self._send_json(200, digest_homebase.state())
+
+    def _homebase_meta(self):
+        data, ok = self._homebase_body()
+        if not ok:
+            return
+        try:
+            digest_homebase.set_meta(data.get("id", ""), data.get("fields", {}) or {})
+        except ValueError as exc:
+            self._send_json(400, {"ok": False, "error": str(exc)})
+            return
+        self._send_json(200, {"ok": True, "meta": digest_homebase.load()["nodes"]})
+
+    def _homebase_prefs(self):
+        data, ok = self._homebase_body()
+        if not ok:
+            return
+        self._send_json(200, {"ok": True, "prefs": digest_homebase.set_prefs(data)})
+
+    def _homebase_note(self):
+        data, ok = self._homebase_body()
+        if not ok:
+            return
+        try:
+            digest_homebase.add_note(data.get("id", ""), data.get("text", ""))
+        except ValueError as exc:
+            self._send_json(400, {"ok": False, "error": str(exc)})
+            return
+        self._send_json(200, {"ok": True, "meta": digest_homebase.load()["nodes"]})
+
+    def _homebase_chat(self):
+        data, ok = self._homebase_body()
+        if not ok:
+            return
+        try:
+            result = digest_homebase.chat(
+                data.get("id", ""), data.get("text", ""),
+                mode=("edit" if data.get("mode") == "edit" else "ask"),
+            )
+        except ValueError as exc:
+            self._send_json(400, {"ok": False, "error": str(exc)})
+            return
+        except DigestLLMError as exc:
+            self._send_json(502, {"ok": False, "error": str(exc)})
+            return
+        except Exception as exc:  # noqa: BLE001
+            self._send_json(500, {"ok": False, "error": f"{type(exc).__name__}: {exc}"})
+            return
+        self._send_json(200, result)
+
+    def _homebase_chat_reset(self):
+        data, ok = self._homebase_body()
+        if not ok:
+            return
+        digest_homebase.reset_chat(data.get("id", ""))
+        self._send_json(200, {"ok": True, "meta": digest_homebase.load()["nodes"]})
+
+    def _homebase_breakdown(self):
+        data, ok = self._homebase_body()
+        if not ok:
+            return
+        try:
+            result = digest_homebase.breakdown(data.get("id", ""))
+        except ValueError as exc:
+            self._send_json(400, {"ok": False, "error": str(exc)})
+            return
+        except DigestLLMError as exc:
+            self._send_json(502, {"ok": False, "error": str(exc)})
+            return
+        except Exception as exc:  # noqa: BLE001
+            self._send_json(500, {"ok": False, "error": f"{type(exc).__name__}: {exc}"})
+            return
+        self._send_json(200, result)
+
+    def _homebase_reset_progress(self):
+        reset = digest_homebase.reset_progress()
+        self._send_json(200, {"ok": True, "reset": reset, **self._tasks_payload()})
 
     def _memory_profile(self):
         try:

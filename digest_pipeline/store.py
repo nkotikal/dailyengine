@@ -914,6 +914,26 @@ def merge_weekly_tasks(new_items: list, source: str = "derived") -> dict:
         return {"added": added, "added_subtasks": added_subs, "tasks": items}
 
 
+def reset_weekly_progress() -> int:
+    """Uncheck every task and subtask but keep the structure (start the week over)."""
+    with _LOCK:
+        items = list_weekly_tasks()
+        changed = 0
+
+        def walk(nodes):
+            nonlocal changed
+            for n in nodes or []:
+                if n.get("done"):
+                    n["done"] = False
+                    changed += 1
+                walk(n.get("subtasks"))
+
+        walk(items)
+        if changed:
+            _save_weekly_tasks(items)
+        return changed
+
+
 def clear_weekly_tasks(only_done: bool = False) -> int:
     with _LOCK:
         items = list_weekly_tasks()
