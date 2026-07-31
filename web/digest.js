@@ -10,9 +10,10 @@
     resume: "Paste a job description. Get a tailored, one-page, ATS-ready resume.",
     digest: "Feed it your goals and tasks. Get a compartmentalized digest emailed each morning.",
     memory: "Long-term context the engine remembers about you - build it up, prune it, reshape it.",
+    homebase: "Every task as a place you can fly to. Zoom in, break it down, ask it questions.",
   };
-  const TITLES = { resume: "ResumeForge", digest: "Daily Digest", memory: "Memory" };
-  const VIEWS = ["resume", "digest", "memory"];
+  const TITLES = { resume: "ResumeForge", digest: "Daily Digest", memory: "Memory", homebase: "Home Base" };
+  const VIEWS = ["resume", "digest", "memory", "homebase"];
 
   function switchTab(which) {
     VIEWS.forEach((v) => {
@@ -29,7 +30,14 @@
     try { localStorage.setItem("activeTab", which); } catch (e) { /* ignore */ }
     if (which === "digest" && !loadedOnce) { loadedOnce = true; loadStatus(); }
     if (which === "memory" && !memoryLoaded) { memoryLoaded = true; loadMemory(); }
+    // Home Base runs a WebGL loop, so it only renders while its tab is on screen.
+    const hb = window.HomeBase;
+    if (hb) { if (which === "homebase") hb.enter(); else hb.leave(); }
   }
+  // The Home Base module loads after this script; let it catch up on the current tab.
+  window.__digestActiveTab = () => {
+    try { return localStorage.getItem("activeTab") || "digest"; } catch (e) { return "digest"; }
+  };
 
   function switchSub(which) {
     const tabs = document.querySelectorAll("#digest-subtabs .subtab");
@@ -1547,6 +1555,7 @@
     $("tab-resume").addEventListener("click", () => switchTab("resume"));
     $("tab-digest").addEventListener("click", () => switchTab("digest"));
     $("tab-memory").addEventListener("click", () => switchTab("memory"));
+    $("tab-homebase").addEventListener("click", () => switchTab("homebase"));
     setupCollapsibles();
     ["d-weekly-goals", "d-tasks", "d-longterm-goals", "d-schedule"].forEach(enableTabKey);
     $("m-ingest").addEventListener("click", ingestResume);

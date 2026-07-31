@@ -6,12 +6,20 @@
   <title>DailyEngine</title>
   <link rel="stylesheet" href="/styles.css" />
   <link rel="stylesheet" href="/digest.css" />
+  <link rel="stylesheet" href="/static/homebase.css" />
   <script>
     // Apply the saved theme + pattern before first paint to avoid a flash.
     try {
       var t = localStorage.getItem("rf-theme"); if (t) document.documentElement.setAttribute("data-theme", t);
       var p = localStorage.getItem("rf-pattern"); if (p) document.documentElement.setAttribute("data-pattern", p);
     } catch (e) {}
+  </script>
+  <!-- three.js is vendored under web/vendor so Home Base works with no network. -->
+  <script type="importmap">
+    {"imports": {
+      "three": "/static/vendor/three.module.min.js",
+      "three/addons/": "/static/vendor/addons/"
+    }}
   </script>
 </head>
 <body>
@@ -85,6 +93,7 @@
       <button class="tab" id="tab-resume" type="button" role="tab" aria-selected="false">Resume</button>
       <button class="tab active" id="tab-digest" type="button" role="tab" aria-selected="true">Daily Digest</button>
       <button class="tab" id="tab-memory" type="button" role="tab" aria-selected="false">Memory</button>
+      <button class="tab" id="tab-homebase" type="button" role="tab" aria-selected="false">Home Base</button>
     </nav>
 
     <!-- ===================== RESUME VIEW ===================== -->
@@ -847,9 +856,154 @@
       <footer class="foot">Long-term memory is saved locally and woven into every digest.</footer>
     </div>
     <!-- =================== END MEMORY VIEW =================== -->
+
+    <!-- ==================== HOME BASE VIEW ==================== -->
+    <div class="view" id="view-homebase" hidden>
+      <div class="hb-root" id="hb-root">
+        <div class="hb-stage" id="hb-stage"></div>
+        <div class="hb-vignette" aria-hidden="true"></div>
+
+        <!-- TOP: progress + filters -->
+        <header class="hb-top">
+          <div class="hb-progress" id="hb-progress">
+            <div class="hb-progress-line">
+              <span class="hb-count" id="hb-count">0 / 0</span>
+              <span class="hb-scope" id="hb-scope">due this week</span>
+              <span class="hb-pct" id="hb-pct">0%</span>
+            </div>
+            <div class="hb-bar"><span class="hb-bar-fill" id="hb-bar-fill"></span></div>
+          </div>
+          <div class="hb-filters" id="hb-filters">
+            <button class="hb-chip active" type="button" data-filter="week">This week</button>
+            <button class="hb-chip" type="button" data-filter="today">Today</button>
+            <button class="hb-chip" type="button" data-filter="overdue">Overdue</button>
+            <button class="hb-chip" type="button" data-filter="nodue">No due date</button>
+            <button class="hb-chip" type="button" data-filter="all">All</button>
+            <select class="hb-select" id="hb-day" aria-label="Filter by weekday" title="Jump to a single day">
+              <option value="">Any day</option>
+            </select>
+          </div>
+        </header>
+
+        <!-- TOOLBAR -->
+        <div class="hb-tools">
+          <select class="hb-select" id="hb-scene" aria-label="Scene theme" title="Scene theme">
+            <option value="space">Orbital &middot; space</option>
+            <option value="constellation">Constellation &middot; void</option>
+          </select>
+          <select class="hb-select" id="hb-quality" aria-label="Graphics quality" title="Graphics quality">
+            <option value="high">High</option>
+            <option value="balanced">Balanced</option>
+            <option value="low">Low</option>
+          </select>
+          <button class="hb-btn" id="hb-parse-open" type="button">Tasks</button>
+          <button class="hb-btn" id="hb-reload" type="button" title="Reload tasks from disk">Sync</button>
+          <button class="hb-btn" id="hb-full" type="button">Fullscreen</button>
+        </div>
+
+        <!-- BREADCRUMBS -->
+        <nav class="hb-crumbs" id="hb-crumbs" aria-label="Zoom path"></nav>
+
+        <!-- INSPECTOR -->
+        <aside class="hb-panel hb-inspector" id="hb-inspector" hidden>
+          <div class="hb-panel-head">
+            <span class="hb-kind" id="hb-ins-kind">Task</span>
+            <button class="hb-x" id="hb-ins-close" type="button" aria-label="Close">&times;</button>
+          </div>
+          <input class="hb-title-input" id="hb-ins-text" type="text" placeholder="Task name" />
+          <div class="hb-row">
+            <label class="hb-check"><input type="checkbox" id="hb-ins-done" /><span>Done</span></label>
+            <select class="hb-select grow" id="hb-ins-priority" aria-label="Priority">
+              <option value="critical">Critical</option>
+              <option value="high">High</option>
+              <option value="medium">Medium</option>
+              <option value="low">Low</option>
+            </select>
+          </div>
+          <div class="hb-row">
+            <input class="hb-field" id="hb-ins-due" type="date" aria-label="Due date" />
+            <input class="hb-field short" id="hb-ins-est" type="text" placeholder="2h" aria-label="Estimate" />
+          </div>
+          <div class="hb-row hb-icons" id="hb-ins-icons"></div>
+          <label class="hb-mini-label">Description</label>
+          <textarea class="hb-field area" id="hb-ins-desc" rows="3" spellcheck="false"
+            placeholder="What this actually involves. Saved to Home Base only."></textarea>
+          <div class="hb-row">
+            <button class="hb-btn wide" id="hb-ins-ask" type="button">Ask about this</button>
+          </div>
+          <div class="hb-sub-add">
+            <input class="hb-field" id="hb-ins-subtext" type="text" placeholder="Add a subtask and press Enter" />
+          </div>
+          <div class="hb-children" id="hb-ins-children"></div>
+          <div class="hb-notes" id="hb-ins-notes"></div>
+          <div class="hb-panel-foot">
+            <button class="hb-btn subtle" id="hb-ins-breakdown" type="button">Break down</button>
+            <button class="hb-btn danger" id="hb-ins-delete" type="button">Delete</button>
+          </div>
+          <div class="hb-err" id="hb-ins-err" hidden></div>
+        </aside>
+
+        <!-- PER-TASK LLM SPACE -->
+        <section class="hb-panel hb-chat" id="hb-chat" hidden>
+          <div class="hb-panel-head">
+            <span class="hb-kind" id="hb-chat-title">Ask</span>
+            <div class="hb-modes" id="hb-chat-modes">
+              <button class="hb-mini active" type="button" data-mode="ask">Ask</button>
+              <button class="hb-mini" type="button" data-mode="edit">Edit</button>
+            </div>
+            <button class="hb-x" id="hb-chat-close" type="button" aria-label="Close">&times;</button>
+          </div>
+          <div class="hb-thread" id="hb-thread"></div>
+          <div class="hb-composer">
+            <textarea class="hb-field area" id="hb-chat-input" rows="2" spellcheck="false"
+              placeholder="Ask about this task, or tell it what changed..."></textarea>
+            <div class="hb-row">
+              <button class="hb-btn wide" id="hb-chat-send" type="button">Send</button>
+              <button class="hb-btn subtle" id="hb-chat-reset" type="button">Clear</button>
+            </div>
+          </div>
+          <div class="hb-err" id="hb-chat-err" hidden></div>
+        </section>
+
+        <!-- TASK SOURCE / PARSING -->
+        <section class="hb-panel hb-parse" id="hb-parse" hidden>
+          <div class="hb-panel-head">
+            <span class="hb-kind">Tasks</span>
+            <button class="hb-x" id="hb-parse-close" type="button" aria-label="Close">&times;</button>
+          </div>
+          <label class="hb-mini-label">Task list (a tab indent makes a subtask, leading ' marks priority)</label>
+          <textarea class="hb-field area tall" id="hb-parse-text" rows="10" spellcheck="false"
+            placeholder="AMD&#10;&#9;'Merge the scheduler PR&#10;&#9;Write the perf writeup&#10;Applications&#10;&#9;'''Finish the Stanford essay"></textarea>
+          <div class="hb-row">
+            <div class="hb-seg" id="hb-parse-mode">
+              <button class="hb-mini active" type="button" data-parse="llm">LLM</button>
+              <button class="hb-mini" type="button" data-parse="det">Deterministic</button>
+            </div>
+            <div class="hb-seg" id="hb-parse-write">
+              <button class="hb-mini active" type="button" data-write="merge">Merge</button>
+              <button class="hb-mini" type="button" data-write="replace">Replace</button>
+            </div>
+          </div>
+          <button class="hb-btn wide primary" id="hb-parse-run" type="button">Parse into Home Base</button>
+          <div class="hb-panel-foot wrap">
+            <button class="hb-btn subtle" id="hb-add-cat" type="button">+ Category</button>
+            <button class="hb-btn subtle" id="hb-reset-progress" type="button">Reset progress</button>
+            <button class="hb-btn subtle" id="hb-clear-done" type="button">Clear done</button>
+            <button class="hb-btn danger" id="hb-wipe" type="button">Wipe all</button>
+          </div>
+          <div class="hb-err" id="hb-parse-err" hidden></div>
+        </section>
+
+        <div class="hb-hint" id="hb-hint">drag to orbit &middot; click to select &middot; double-click to dive in &middot; esc to back out</div>
+        <div class="hb-toast" id="hb-toast" hidden></div>
+        <div class="hb-loading" id="hb-loading">Building the cosmos&hellip;</div>
+      </div>
+    </div>
+    <!-- ================== END HOME BASE VIEW ================== -->
   </main>
 
   <script src="/app.js"></script>
   <script src="/digest.js"></script>
+  <script type="module" src="/static/homebase/index.js"></script>
 </body>
 </html>

@@ -920,7 +920,7 @@ async function deleteUser() {
 // language; the emailed report is translated server-side.
 const I18N_KO = {
   // tabs + sub-tabs
-  "Resume": "이력서", "Daily Digest": "데일리 다이제스트", "Memory": "메모리",
+  "Resume": "이력서", "Daily Digest": "데일리 다이제스트", "Memory": "메모리", "Home Base": "홈 베이스",
   "Digest": "다이제스트", "Plan": "계획", "Sources": "소스", "Learning": "학습", "Settings": "설정",
   // panel titles
   "About you": "내 정보", "Delivery": "발송 설정", "Schedule → Calendar": "일정 → 캘린더",
