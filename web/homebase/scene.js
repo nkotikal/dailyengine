@@ -18,6 +18,9 @@ import { makeCore, makeLink, makeOrb, makeOrbitRing, makeReticle, setDim, setHov
 import { qualityOf, readPalette, sceneOf, statusColor } from "./themes.js";
 
 const EASE = (k) => 1 - Math.pow(1 - k, 3);
+// Wide enough to catch an unhurried double-click, and the panel delay has to match
+// it exactly: open the inspector any sooner and it lands under the second click.
+const DOUBLE_MS = 320;
 
 export function createScene(mount, hooks = {}) {
   const state = {
@@ -265,6 +268,12 @@ export function createScene(mount, hooks = {}) {
   const raycaster = new THREE.Raycaster();
   const pointer = new THREE.Vector2();
   let downAt = null;
+  let lastClick = { t: 0, x: 0, y: 0 };
+  let panelTimer = 0;
+
+  function cancelPendingPanel() {
+    if (panelTimer) { clearTimeout(panelTimer); panelTimer = 0; }
+  }
 
   function pick(ev) {
     if (!level) return null;
@@ -292,37 +301,62 @@ export function createScene(mount, hooks = {}) {
     downAt = { x: ev.clientX, y: ev.clientY, t: performance.now() };
   }
 
+  /**
+   * Clicks are resolved here rather than through a native `dblclick` listener.
+   * The inspector is an overlay on top of the canvas, so if the first click of a
+   * double-click opened it the panel would sit under the pointer and eat the
+   * second click - making orbs on that side of the stage impossible to dive into.
+   */
   function onPointerUp(ev) {
     if (!downAt) return;
     const moved = Math.hypot(ev.clientX - downAt.x, ev.clientY - downAt.y);
     const quick = performance.now() - downAt.t < 500;
     downAt = null;
     if (moved > 5 || !quick) return; // that was an orbit drag, not a click
-    const id = pick(ev);
-    select(id);
-  }
 
-  function onDoubleClick(ev) {
     const id = pick(ev);
-    if (id) focus(id);
-    else if (state.focusId) ascend();
+    const now = performance.now();
+    const near = Math.hypot(ev.clientX - lastClick.x, ev.clientY - lastClick.y) < 16;
+
+    if (near && now - lastClick.t < DOUBLE_MS) {
+      cancelPendingPanel();
+      lastClick.t = 0;
+      const node = id ? data.nodeById(id) : null;
+      if (node && !data.isLeaf(node)) focus(id);
+      // Flying into a task with no subtasks would just land you in an empty
+      // chamber, so show its details instead of diving.
+      else if (node) select(id);
+      else if (state.focusId) ascend();
+      return;
+    }
+
+    lastClick = { t: now, x: ev.clientX, y: ev.clientY };
+    // The reticle snaps over immediately so the click still feels instant; only the
+    // detail panel waits out the double-click window.
+    select(id, { panel: false });
+    cancelPendingPanel();
+    panelTimer = setTimeout(() => {
+      panelTimer = 0;
+      if (hooks.onSelect) hooks.onSelect(state.selectedId);
+    }, DOUBLE_MS);
   }
 
   renderer.domElement.addEventListener("pointermove", onPointerMove);
   renderer.domElement.addEventListener("pointerdown", onPointerDown);
   renderer.domElement.addEventListener("pointerup", onPointerUp);
-  renderer.domElement.addEventListener("dblclick", onDoubleClick);
   renderer.domElement.style.cursor = "grab";
 
   // --- public actions -------------------------------------------------------
 
-  function select(id) {
+  function select(id, { panel = true } = {}) {
     state.selectedId = id || null;
     syncReticle();
-    if (hooks.onSelect) hooks.onSelect(state.selectedId);
+    if (panel) cancelPendingPanel();
+    if (panel && hooks.onSelect) hooks.onSelect(state.selectedId);
   }
 
   function focus(id) {
+    cancelPendingPanel();
     const node = id ? data.nodeById(id) : null;
     state.focusId = node ? id : null;
     state.selectedId = node ? id : null;
@@ -332,6 +366,7 @@ export function createScene(mount, hooks = {}) {
   }
 
   function ascend() {
+    cancelPendingPanel();
     if (!state.focusId) return;
     const chain = data.chainOf(state.focusId);
     const parent = chain.length >= 2 ? chain[chain.length - 2] : null;
@@ -466,11 +501,11 @@ export function createScene(mount, hooks = {}) {
   function dispose() {
     state.disposed = true;
     stop();
+    cancelPendingPanel();
     ro.disconnect();
     renderer.domElement.removeEventListener("pointermove", onPointerMove);
     renderer.domElement.removeEventListener("pointerdown", onPointerDown);
     renderer.domElement.removeEventListener("pointerup", onPointerUp);
-    renderer.domElement.removeEventListener("dblclick", onDoubleClick);
     if (level) disposeTree(level.group);
     if (backdrop) disposeTree(backdrop.group);
     disposeTextures();

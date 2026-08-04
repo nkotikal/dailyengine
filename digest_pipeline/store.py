@@ -885,15 +885,17 @@ def merge_weekly_tasks(new_items: list, source: str = "derived") -> dict:
                 subs_in = it.get("subtasks") or []
                 due = (it.get("due") or "").strip()
                 est = int(it.get("est_minutes") or 0)
+                done = bool(it.get("done"))
             else:
                 text, pr, subs_in, due, est = str(it).strip(), "medium", [], "", 0
+                done = False
             if not text:
                 continue
             key = text.lower()
             existing = by_text.get(key)
             if existing is None:
                 task = {
-                    "id": uuid.uuid4().hex[:12], "text": text, "done": False,
+                    "id": uuid.uuid4().hex[:12], "text": text, "done": done,
                     "priority": pr if pr in ("critical", "high", "medium", "low") else "medium",
                     "due": due, "est_minutes": est,
                     "subtasks": _mk_subtasks(subs_in),

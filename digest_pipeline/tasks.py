@@ -21,13 +21,17 @@ the week. The input may be NESTED: lines indented (tabbed) under a line are
 SUBTASKS of that line. Preserve that structure. Respond with ONLY a JSON object:
 
 { "tasks": [ {"text": "a concrete task starting with a verb", "priority": "critical|high|medium|low",
-              "due": "YYYY-MM-DD or empty", "est_minutes": 0,
+              "due": "YYYY-MM-DD or empty", "est_minutes": 0, "done": false,
               "subtasks": [ {"text": "a concrete subtask", "priority": "critical|high|medium|low",
+                             "done": false,
                              "subtasks": [ {"text": "deeper step"} ] } ] } ] }
 
 Subtasks may nest to ANY depth - mirror however deep the input is tabbed.
 PRIORITY MARKERS: a line starting with ''' (triple apostrophe) is CRITICAL (double
 priority); a single ' is high. Preserve that as the item's "priority".
+COMPLETION MARKER: a line starting with # is ALREADY DONE. It may combine with the
+apostrophes ("#'task"). Set "done": true on those, keep them in the tree, and never
+copy the markers themselves into "text".
 
 RULES:
 - Keep the nesting from the input: a tabbed line becomes a subtask of the line above.
@@ -96,13 +100,26 @@ def _indent_level(line: str) -> int:
 
 
 def _strip_priority(s: str):
-    """Leading apostrophes set priority: ''' (3+) = critical, ' (1-2) = high, else medium."""
+    """Peel the leading markers off a line.
+
+    '#' means already completed and ''' (3+) / ' (1-2) set critical / high priority.
+    The two kinds combine in either order ("#'task"), so both are consumed until the
+    real text starts. Returns (text, priority, important, done).
+    """
     s = s.strip()
-    n = 0
-    while n < len(s) and s[n] == "'":
-        n += 1
-    pr = "critical" if n >= 3 else ("high" if n >= 1 else "medium")
-    return s[n:].strip(), pr, n >= 1
+    done = False
+    quotes = 0
+    while s:
+        if s[0] == "#":
+            done = True
+            s = s[1:].lstrip()
+        elif s[0] == "'":
+            quotes += 1
+            s = s[1:]
+        else:
+            break
+    pr = "critical" if quotes >= 3 else ("high" if quotes >= 1 else "medium")
+    return s.strip(), pr, quotes >= 1, done
 
 
 def parse_outline(text: str) -> list:
@@ -113,10 +130,11 @@ def parse_outline(text: str) -> list:
             continue
         level = _indent_level(raw)
         s = raw.strip().lstrip("-*\u2022").strip()
-        s, priority, important = _strip_priority(s)
+        s, priority, important, done = _strip_priority(s)
         if not s:
             continue
-        node = {"text": s, "important": important, "priority": priority, "children": []}
+        node = {"text": s, "important": important, "priority": priority,
+                "done": done, "children": []}
         while stack and stack[-1][0] >= level:
             stack.pop()
         (stack[-1][1]["children"] if stack else roots).append(node)
@@ -127,6 +145,7 @@ def parse_outline(text: str) -> list:
 def _children_to_subtasks(children: list) -> list:
     """Convert outline children into a (recursive) subtask tree, preserving depth + priority."""
     return [{"text": c["text"], "priority": c.get("priority", "medium"),
+             "done": bool(c.get("done")),
              "subtasks": _children_to_subtasks(c["children"])} for c in children]
 
 
@@ -156,6 +175,7 @@ def _fallback(weekly_text: str) -> list:
         tasks.append({
             "text": node["text"],
             "priority": node.get("priority", "medium"),
+            "done": bool(node.get("done")),
             "due": "", "est_minutes": 0,
             "subtasks": _children_to_subtasks(node["children"]),
         })
@@ -172,6 +192,7 @@ def _norm_subs(items) -> list:
             pr = str(s.get("priority", "medium")).lower()
             out.append({"text": s["text"].strip(),
                         "priority": pr if pr in _VALID_PR else "medium",
+                        "done": bool(s.get("done")),
                         "subtasks": _norm_subs(s.get("subtasks"))})
         elif isinstance(s, str) and s.strip():
             out.append({"text": s.strip(), "subtasks": []})
@@ -193,6 +214,7 @@ def _normalize_derived(raw_tasks) -> list:
             due = ""  # only accept ISO dates
         out.append({"text": str(t["text"]).strip(),
                     "priority": pr if pr in _VALID_PR else "medium",
+                    "done": bool(t.get("done")),
                     "due": due, "est_minutes": parse_est(t.get("est_minutes")),
                     "subtasks": _norm_subs(t.get("subtasks"))})
     return out

@@ -290,7 +290,7 @@ def _deterministic_digest(cfg, updates, when_human, *, parsed_schedule=None,
             s = ln.strip().lstrip("-*").strip()
             if not s:
                 continue
-            text, pr, _imp = tasks._strip_priority(s)
+            text, pr, _imp, _done = tasks._strip_priority(s)
             out.append({"text": text, "priority": pr})
         return out
 

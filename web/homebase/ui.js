@@ -405,6 +405,10 @@ function wireKeys(app) {
       app.select(null);
     } else if (e.key === "Backspace") {
       if (app.scene.focusId) { e.preventDefault(); app.scene.ascend(); }
+    } else if (e.key === "Enter") {
+      // A dive route that cannot be blocked by a panel sitting over the orb.
+      const node = data.nodeById(app.selectedId);
+      if (node && !data.isLeaf(node)) { e.preventDefault(); app.scene.focus(node.id); }
     } else if (e.key === "f" || e.key === "F") {
       toggleFullscreen(app);
     }
